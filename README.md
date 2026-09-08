@@ -98,6 +98,50 @@ differences as noise.
 
 ---
 
+## The hands-on steps / ハンズオンのステップ
+
+**Start here if you are following along.** Each step shows the exact configuration —
+which field, in which resource, why it is there, what breaks without it, and how to
+prove it took effect independently of the timing number.
+
+**手を動かして進める場合はここから始めてください。** 各ステップに、設定そのもの
+（どのフィールドを、どのリソースに、なぜ、無いと何が壊れるか、そして時間の数字に頼らず
+効いたことをどう証明するか）が書かれています。
+
+| Step | Configuration change / 設定変更 |
+|---|---|
+| [1 — Baseline](steps/01-baseline.md) | Nothing. Establishes what to measure against.<br>何もしない。比較対象を作る |
+| [2 — EBS snapshot](steps/02-snapshot.md) | **One field:** `snapshotID` on the data volume<br>**1 フィールド:** データボリュームの `snapshotID` |
+| [3 — NVMe + SOCI](steps/03-soci.md) | `instanceStorePolicy: RAID0` + 6 lines of Bottlerocket TOML<br>同左 + Bottlerocket TOML 6 行 |
+| [4 — Auto Mode](steps/04-automode.md) | Nothing — understood by subtraction from step 3<br>何もしない。ステップ 3 からの引き算で理解する |
+| [5 — Warm scale-out](steps/05-warm.md) | No config change; changes how you *run*<br>設定変更なし。*実行方法*が変わる |
+| [6 — Model weights](steps/06-weights.md) | Three vLLM command lines, incl. Run:ai Model Streamer<br>vLLM の引数 3 通り（Run:ai Model Streamer を含む） |
+
+Two helpers make the configuration visible at the terminal, and the demo calls them
+around every arm:
+
+設定を端末上で確認するためのヘルパーが 2 つあり、デモは各 arm の前後でこれを呼びます。
+
+```bash
+bin/show_config.sh arm-c-soci     # what changes, where, and why -- before you apply
+bin/verify_config.sh arm-c-soci   # proof it took effect -- after you run
+```
+
+`show_config.sh` diffs the **real rendered manifests** against the baseline arm with
+comments and arm-name noise stripped, so what prints is only the configuration that
+actually differs — and it cannot drift from what is applied. `verify_config.sh` checks
+the mechanism directly (did the volume come from the snapshot, did container storage
+move to NVMe, which loader did vLLM start with) and **states what each check does not
+prove**, because an overclaimed check retires a question that is still open.
+
+`show_config.sh` は**実際に展開済みのマニフェスト**をベースラインと diff し、コメントと
+arm 名の差分を除去するので、本当に異なる設定だけが出力されます。適用内容と乖離しません。
+`verify_config.sh` は仕組みを直接確認し（ボリュームはスナップショット由来か、コンテナ
+ストレージは NVMe に移ったか、vLLM はどのローダーで起動したか）、**各確認が何を証明
+しないかも明示します。** 過剰に主張する確認は、未解決の問いを閉じてしまうためです。
+
+---
+
 ## Reference results / 参考計測値
 
 One measured run is published in [REFERENCE-RESULTS.md](REFERENCE-RESULTS.md), so
@@ -671,10 +715,13 @@ bin/
   first_token.py                  time to first token, runs inside the pod
   render_weights.py               phase 2 render (not sed: multi-line insertion)
   check_runai.sh                  confirm the image can do Run:ai streaming
+  show_config.sh                  what an arm changes, where, and why (before)
+  verify_config.sh                proof the setting took effect (after)
   assert_br_version.py            guard against SOCI silently not running
   demo.sh                         the narrated sequence, for recording
   record.sh                       asciinema -> gif -> mp4
   rehearse.sh                     demo.sh against fixtures, no AWS calls
+steps/                            the hands-on steps, one per configuration change
 rehearsal/                        invented fixtures + a fake kubectl
 raw/                              per-run Kubernetes objects, kept for audit
 results/                          per-run JSON + report.md

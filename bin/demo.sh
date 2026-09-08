@@ -120,7 +120,15 @@ if [[ "${QUICK}" == false ]]; then
 
   say "The interesting moment is coming up. The provisioning steps will scroll past quickly, and then one line will sit there on its own for a while. That line is the whole point of this workshop."
 
+  say "Before the number, the configuration. This is the baseline, so there is nothing configured -- but look at the shape of the node class, because everything the other arms do is a change to it."
+
+  run "${HERE}/show_config.sh" arm-a-baseline
+
   run "${HERE}/bench.sh" arm-a-baseline
+
+  say "Now prove it really was a clean baseline -- no userData, no instanceStorePolicy, no snapshotID, and container storage on EBS rather than NVMe. That is what makes every later gain attributable to what that arm added."
+
+  run "${HERE}/verify_config.sh" arm-a-baseline
 
   say "There it is. The node was ready in about half a minute. The image pull then took roughly three times as long as everything else put together. That matters because it means the fix is not in how you provision nodes -- it is in how the image gets to them."
 
@@ -132,15 +140,31 @@ title "Item 2 -- two ways to deal with the image, and you only get one"
 
 say "Arm B: the image layers were baked into an EBS snapshot ahead of time, and the node restores its data volume from that snapshot. There is nothing to pull, because the layers are already on the disk when the node boots."
 
+say "Here is the entire configuration change for arm B. One field."
+
+run "${HERE}/show_config.sh" arm-b-snapshot
+
 run "${HERE}/bench.sh" arm-b-snapshot
 
 say "No pull stage at all -- kubelet reports the image as already present on the machine. It never contacted the registry."
+
+say "Now the proof, which does not depend on the timing at all. It reads the volume the node actually booted with and compares its snapshot ID to the one we built. Then it checks kubelet reported the image as already present."
+
+run "${HERE}/verify_config.sh" arm-b-snapshot
 
 say "That speed has a price, and I would rather state it than have you find it. Building that snapshot took about fifteen minutes, and it has to be rebuilt every time the image changes. Hold that thought for the last section."
 
 say "Arm C now: instead of pre-baking, we move container storage onto the instance's local NVMe and switch the snapshotter to SOCI in parallel pull/unpack mode. SOCI opens several connections per layer and unpacks several layers at once. The image is completely unmodified -- no index to build, no change to your build pipeline."
 
+say "Arm C is two changes, and this is the whole of it -- a policy line, and Bottlerocket settings in TOML. Note that Bottlerocket takes settings, not a shell script; that is the most common thing to get wrong coming from Amazon Linux."
+
+run "${HERE}/show_config.sh" arm-c-soci
+
 run "${HERE}/bench.sh" arm-c-soci
+
+say "The proof for arm C. Container storage moved to NVMe -- visible in the node's ephemeral-storage capacity, which now reflects the instance store rather than the EBS volume. And the settings reached the node. Note what this does not prove: that SOCI ran. Bottlerocket has no shell to check from, so the behavioural evidence is the throughput figure."
+
+run "${HERE}/verify_config.sh" arm-c-soci
 
 say "This is the honest comparison in the whole workshop: A against C. Same provisioner, same operating system, same instance type. One mechanism changed."
 
@@ -151,11 +175,15 @@ title "Item 3 -- what Auto Mode does without being asked"
 
 say "Before the numbers, look at the configuration. This is arm C's node class against arm D's. Count what is present on the left and absent on the right."
 
-run diff -u "${ROOT}/manifests/rendered/12-arm-c-soci.yaml" "${ROOT}/manifests/rendered/13-arm-d-automode.yaml"
+run "${HERE}/show_config.sh" arm-d-automode
 
 say "The instanceStorePolicy is gone. The six lines of Bottlerocket settings are gone. The block device mappings are gone. And yet on a GPU instance with local NVMe, Auto Mode formats the NVMe, puts container storage on it, and pulls and unpacks in parallel. That is arm C's configuration, done by the service."
 
 run "${HERE}/bench.sh" arm-d-automode
+
+say "And the proof that we did not quietly configure it after all: no userData, no instanceStorePolicy, no block device mappings -- yet the node still reports the NVMe."
+
+run "${HERE}/verify_config.sh" arm-d-automode
 
 say "Two things Auto Mode cannot do, and both belong on the record. There is no snapshotID on its NodeClass, so arm B's mechanism is unavailable -- if pre-baked images are the right answer for a workload, that workload does not go on Auto Mode. And the SOCI tuning knobs from arm C are not exposed; you get the service defaults."
 
@@ -186,6 +214,8 @@ sleep "${BEAT}"
 
 say "First to second changes only the loader: identical bytes on identical disk. Second to third changes only the delivery. Reporting them separately keeps one effect from being credited to the other."
 
+run "${HERE}/show_config.sh" weights
+
 run "${HERE}/bench.sh" weights s3-initcontainer
 
 say "Look at the breakdown under 'workload becomes Ready'. Those lines come from vLLM's own log, and they are the reason this section has three variants instead of two. Reading the weights is a fraction of a second. Compiling and warming the engine is tens of seconds. A faster loader can only touch the fraction of a second."
@@ -201,6 +231,10 @@ say "The third variant changes the delivery instead of the loader. vLLM points s
 run "${HERE}/bench.sh" weights runai-s3
 
 say "That one does move. Note where the gain comes from: not from loading faster -- streaming from S3 is actually a little slower per tensor than reading local disk -- but from deleting a step. On a larger model the loader would matter too; at this size, only the delivery does."
+
+say "The proof for phase 2 -- which loader the pod actually started with, whether the model came from disk or straight from S3, and the timing breakdown from vLLM's own log."
+
+run "${HERE}/verify_config.sh" weights
 
 say "One more number in these runs: time to first token. Ready only means vLLM answers its health endpoint. It does not mean the server will produce a token promptly. Submit-to-first-token is the number a user would actually feel."
 
@@ -226,6 +260,10 @@ DECISION
 sleep "${BEAT}"
 
 say "Two questions decide most of this, and neither is a matter of opinion. How often do your images change -- that is the fork between B and C. And how much of your startup cost is once-per-node -- that is whether any of this is the right thing to optimise at all."
+
+say "Every configuration you just watched is written up step by step in the steps directory -- the exact YAML, which field goes where, why it is there, what breaks without it, and how to prove it worked. That is what you follow in your own account."
+
+run ls "${ROOT}/steps"
 
 say "The runbook and these scripts go with you. Run the same steps in your own dev account, and the numbers that come out are the ones worth deciding on."
 
