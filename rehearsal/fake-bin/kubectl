@@ -58,7 +58,7 @@ def arm_from(text):
     for name in candidates:
         if name == cleaned or name in text:
             return name
-    # bench.sh labels phase-2 pods with the variant C nodepool
+    # bench.sh labels phase-2 pods with the soci nodepool
     for name in candidates:
         if cleaned and cleaned in name:
             return name

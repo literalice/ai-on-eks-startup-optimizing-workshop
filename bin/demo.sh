@@ -7,7 +7,7 @@
 # the narration is text, the measurements are not.
 #
 #   bin/demo.sh            run the whole thing
-#   bin/demo.sh --quick    skip the cold baseline (variant A), for a shorter recording
+#   bin/demo.sh --quick    skip the cold baseline run, for a shorter recording
 #
 # Prerequisites, all done before recording (see README):
 #   terraform apply, snapshot/build-snapshot.sh, snapshot/stage-model.sh, bin/prep.sh
@@ -79,6 +79,20 @@ run() {
 }
 
 ################################################################################
+# Clear anything left from a previous run before starting.
+#
+# reset.sh only removes the pods labelled for the variant it is about to run, so a pod
+# left Running from an earlier recording keeps its GPU. These instance types have one
+# GPU each, and the variants are pinned to a single instance type, so a few stale pods
+# are enough to exhaust the capacity available in the subnets' Availability Zones and
+# leave later runs Pending on InsufficientInstanceCapacity.
+################################################################################
+for ctx in "${KARPENTER_CLUSTER}" "${AUTOMODE_CLUSTER}"; do
+  kubectl --context "${ctx}" -n bench delete pods --all --ignore-not-found \
+    --wait=false >/dev/null 2>&1 || true
+done
+
+################################################################################
 title "Bottlerocket startup-time workshop"
 
 say "The problem we are here to solve: GPU inference pods take too long to become ready. Rather than assume where the time goes, we are going to measure it, and then measure three different ways of making it shorter."
@@ -87,12 +101,12 @@ say "One point at the start. The image and instance type here are ours, so the a
 
 say "Four variants. Same pod spec, same instance type, same VPC and subnets, same container image. The only thing that differs between them is how the container image reaches the node."
 
-cat <<'ARMS'
-    A  baseline    Bottlerocket as shipped -- EBS data volume, sequential pull
-    B  snapshot    data volume restored from an EBS snapshot holding the layers
-    C  soci        container storage on local NVMe + SOCI parallel pull/unpack
-    D  automode    EKS Auto Mode: local NVMe and parallel pull, set up for you
-ARMS
+cat <<'VARIANT_LIST'
+    baseline    Bottlerocket with default settings -- EBS data volume, sequential pull
+    snapshot    data volume restored from an EBS snapshot that holds the layers
+    soci        container storage on local NVMe, SOCI parallel pull and unpack
+    automode    EKS Auto Mode: local NVMe and parallel pull, configured by the service
+VARIANT_LIST
 sleep "${BEAT}"
 
 say "Two constraints before any figures appear. The snapshot and SOCI variants cannot both be applied to the same node, because both govern the volume Bottlerocket uses for container images. And the snapshot mechanism is not available on Auto Mode, because its NodeClass has no snapshotID field."
@@ -103,7 +117,7 @@ note "Stages are computed from timestamps Kubernetes already records, so they su
 ################################################################################
 title "The environment"
 
-say "Two clusters, one shared VPC. Self-managed Karpenter carries variants A, B and C; EKS Auto Mode carries variant D. Two clusters rather than one because both Karpenters own the same CRDs."
+say "Two clusters, one shared VPC. Self-managed Karpenter carries baseline, snapshot and soci; EKS Auto Mode carries automode. Two clusters rather than one because both Karpenters own the same CRDs."
 
 run kubectl --context "${KARPENTER_CLUSTER}" get nodes -o wide
 run kubectl --context "${AUTOMODE_CLUSTER}" get nodes -o wide
@@ -140,7 +154,7 @@ title "Step 2 and 3 -- two image mechanisms that cannot be combined"
 
 say "The snapshot variant: the image layers were baked into an EBS snapshot ahead of time, and the node restores its data volume from that snapshot. There is nothing to pull, because the layers are already on the disk when the node boots."
 
-say "Here is the entire configuration change for variant B. One field."
+say "Here is the entire configuration change for the snapshot variant. One field."
 
 run "${HERE}/show_config.sh" snapshot
 
@@ -162,22 +176,22 @@ run "${HERE}/show_config.sh" soci
 
 run "${HERE}/bench.sh" soci
 
-say "The proof for variant C. Container storage moved to NVMe -- visible in the node's ephemeral-storage capacity, which now reflects the instance store rather than the EBS volume. And the settings reached the node. Note what this does not prove: that SOCI ran. Bottlerocket has no shell to check from, so the behavioural evidence is the throughput figure."
+say "The check for soci. Container storage moved to NVMe -- visible in the node's ephemeral-storage capacity, which now reflects the instance store rather than the EBS volume. And the settings reached the node. Note what this does not prove: that SOCI ran. Bottlerocket has no shell to check from, so the behavioural evidence is the throughput figure."
 
 run "${HERE}/verify_config.sh" soci
 
 say "The baseline and SOCI variants differ by one mechanism, with the same provisioner, operating system and instance type. That makes the difference between them attributable to that mechanism."
 
-note "Compare the throughput figures for variants A and C. The difference is the effect of parallel pull and unpack."
+note "Compare the throughput figures for baseline and soci. The difference is the effect of parallel pull and unpack."
 
 ################################################################################
 title "Step 4 -- what Auto Mode does without being configured"
 
-say "Before the numbers, look at the configuration. This is the SOCI node class against variant D's. Count what is present on the left and absent on the right."
+say "Before the numbers, look at the configuration. This is the soci node class against automode's. Count what is present on the left and absent on the right."
 
 run "${HERE}/show_config.sh" automode
 
-say "The instanceStorePolicy is gone. The six lines of Bottlerocket settings are gone. The block device mappings are gone. And yet on a GPU instance with local NVMe, Auto Mode formats the NVMe, puts container storage on it, and pulls and unpacks in parallel. That is the SOCI variant's configuration, done by the service."
+say "The instanceStorePolicy is gone. The six lines of Bottlerocket settings are gone. The block device mappings are gone. And yet on a GPU instance with local NVMe, Auto Mode formats the NVMe, puts container storage on it, and pulls and unpacks in parallel. That is the soci configuration, done by the service."
 
 run "${HERE}/bench.sh" automode
 
@@ -185,7 +199,7 @@ say "And the proof that we did not quietly configure it after all: no userData, 
 
 run "${HERE}/verify_config.sh" automode
 
-say "Two things Auto Mode cannot do, and both belong on the record. There is no snapshotID on its NodeClass, so the snapshot mechanism is unavailable -- if pre-baked images are the right answer for a workload, that workload does not go on Auto Mode. And the SOCI tuning knobs from variant C are not exposed; you get the service defaults."
+say "Two things Auto Mode cannot do. There is no snapshotID on its NodeClass, so the snapshot mechanism is unavailable -- if pre-baked images are the right answer for a workload, that workload does not go on Auto Mode. And the SOCI settings from soci are not exposed; the service defaults apply."
 
 ################################################################################
 title "Step 5 -- cold first pod versus warm scale-out"
@@ -194,7 +208,7 @@ say "Everything so far measured the first pod onto a brand new node. Most scale-
 
 run "${HERE}/bench.sh" soci --warm
 
-say "Almost all of the cold measurement was incurred once per node rather than once per pod. This matters for reading variant B: a snapshot affects the first pod on a node and does not affect this one."
+say "Almost all of the cold measurement was incurred once per node rather than once per pod. This matters for reading the snapshot variant: a snapshot affects the first pod on a node and does not affect this one."
 
 say "If most of your pods are scheduled onto nodes that are already running, the three mechanisms we just measured affect a small part of your total startup time. Node capacity policy would affect more of it: keeping nodes for longer, or provisioning them before they are needed."
 
@@ -205,11 +219,11 @@ title "Step 6 -- how the model weights reach GPU memory"
 
 say "Once the image stops being the bottleneck, the weights become the story. Three variants, same node, same model, same bytes. Only the loader differs -- and the effect splits into two separate things, which is why there are three and not two."
 
-cat <<'VARIANTS'
+cat <<'LOADERS'
     s3-initcontainer   copy S3 to disk, then vLLM's default safetensors loader
-    runai-local        same copy, but Run:ai Model Streamer reads from disk
-    runai-s3           no copy at all: the streamer reads S3 directly
-VARIANTS
+    runai-local        the same copy, with Run:ai Model Streamer reading from disk
+    runai-s3           no copy; the streamer reads S3 directly
+LOADERS
 sleep "${BEAT}"
 
 say "First to second changes only the loader: identical bytes on identical disk. Second to third changes only the delivery. Reporting them separately keeps one effect from being credited to the other."
@@ -245,17 +259,17 @@ say "All variants together. Provisioning, image, and workload, plus effective th
 
 run "${HERE}/report.py" "${RESULTS_DIR}"
 
-say "What this does not tell you, stated plainly. One run per variant, so treat anything under about ten percent as noise until it repeats. The snapshot build time is not in the table, and that is the cost that decides whether it is worth adopting. And variant D ran on a different control plane, so read it as indicative rather than like-for-like."
+say "The limits of these figures. One run per variant, so a difference below about ten percent needs a repeat run before being relied on. The snapshot build time is not in the table, and that is the recurring cost of that mechanism. And automode ran on a different control plane, so read it as what Auto Mode provides without configuration rather than a direct comparison."
 
 ################################################################################
 title "Section 5 -- what to adopt"
 
 cat <<'DECISION'
-    Images change rarely, latency critical .... B, the snapshot
-    Images change often ...................... C, SOCI on NVMe
-    Neither should be your problem ........... D, Auto Mode
-    Weights dominate, not layers ............. stream them from S3
-    Warm-node time already dominates ......... none of these; capacity policy
+    Images change rarely, latency matters ....... snapshot
+    Images change often ........................ soci
+    You do not want to maintain either ......... automode
+    Weight loading is longer than the pull ..... stream the weights from S3
+    Warm-node startup is most of the total ..... node capacity policy
 DECISION
 sleep "${BEAT}"
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Variant B pre-work: bake the workload image into an EBS snapshot that Bottlerocket
+# snapshot pre-work: bake the workload image into an EBS snapshot that Bottlerocket
 # mounts as its data volume, so nothing is pulled at node start.
 #
 # This takes 10-20 minutes for a multi-GB image. Run it the day before, not live.

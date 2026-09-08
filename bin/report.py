@@ -370,12 +370,12 @@ def markdown(runs, order, extras):
         "so treat a difference under roughly 10% as noise until it is repeated."
     )
     out.append(
-        "- Variant B's snapshot has to be rebuilt whenever the image changes. The "
+        "- The snapshot has to be rebuilt whenever the image changes. The "
         "build time is not in this table, and it is the cost that decides whether "
         "the mechanism is worth adopting."
     )
     out.append(
-        "- Variant D ran on a different cluster from variants A to C, because Auto Mode and "
+        "- automode ran on a different cluster from the other three, because Auto Mode and "
         "self-managed Karpenter cannot share the karpenter.sh CRDs. Same VPC, "
         "subnets and instance type, so the pull path is identical, but it is not "
         "the same control plane."

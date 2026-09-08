@@ -5,9 +5,9 @@
 #
 #   bin/check_runai.sh
 #
-# Run this after an variant C run, so the node already has the image and the check is
-# a few seconds rather than a cold multi-gigabyte pull. Pinned to the variant C
-# nodepool for that reason; if no variant C node exists it will provision one and take
+# Run this after a soci run, so the node already has the image and the check takes
+# a few seconds rather than a cold multi-gigabyte pull. Pinned to the soci nodepool
+# for that reason; if no soci node exists it will provision one and take
 # as long as a cold pull.
 #
 # The AWS vLLM Deep Learning Container base is documented as bundling

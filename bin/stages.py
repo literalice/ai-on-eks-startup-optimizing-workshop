@@ -161,7 +161,7 @@ def node_facts(node):
     The comparison between variants rests on them being the same hardware in the same
     place. Reading it back off the node turns that from an assertion into a check.
     osImage also states the Bottlerocket version and variant, which is the other
-    thing variant C silently depends on.
+    other thing the soci variant depends on.
     """
     labels = (node.get("metadata") or {}).get("labels") or {}
     info = (node.get("status") or {}).get("nodeInfo") or {}

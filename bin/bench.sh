@@ -113,9 +113,9 @@ if [[ "${WARM}" == true ]]; then
     echo "    ${NODE_COUNT} node(s) still up, image should be cached"
   fi
 elif [[ "${TARGET}" == "weights" ]]; then
-  # Phase 2 compares loaders, not provisioning. Reuse the warm variant C node so the
+  # Phase 2 compares loaders, not provisioning. Reuse the warm soci node so the
   # image pull does not swamp the numbers we are trying to see.
-  echo "==> reusing the variant C node if it is up (this compares loaders, not nodes)"
+  echo "==> reusing the soci node if it is up (this compares loaders, not nodes)"
   kubectl --context "${CONTEXT}" -n bench delete pod \
     -l "workshop-variant=${NODEPOOL}" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
 else

@@ -121,7 +121,7 @@ case "${VARIANT}" in
       limit "container storage moved to instance store as intended"
     else
       fail "~${CAP_GB} GB looks like EBS -- NVMe was not picked up"
-      info "variant C: check instanceStorePolicy: RAID0. variant D: check ephemeralStorage.size"
+      info "soci: check instanceStorePolicy: RAID0. automode: check ephemeralStorage.size"
       info "is BELOW the instance's NVMe capacity, which is what triggers Auto Mode"
     fi
     ;;
@@ -171,7 +171,7 @@ case "${VARIANT}" in
       printf '  %snot proved%s %s\n' "${DIM}" "${RESET}" \
         "that SOCI ran -- Bottlerocket has no shell to check from."
       info "The behavioural evidence is the throughput figure: if SOCI were being"
-      info "ignored, variant C would land on the baseline throughput. That is the check that matters."
+      info "ignored, soci would land on the baseline throughput, which is the check that matters."
     else
       fail "userData does not contain the SOCI snapshotter setting"
     fi

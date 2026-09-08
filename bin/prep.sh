@@ -19,16 +19,33 @@ need aws
 need kubectl
 need jq
 need python3
-need terraform
 
-echo "==> reading terraform outputs"
-KARPENTER_NODE_IAM_ROLE_NAME="$(terraform -chdir="${ROOT}/terraform" output -raw karpenter_node_iam_role_name)"
-MODEL_BUCKET_TF="$(terraform -chdir="${ROOT}/terraform" output -raw model_bucket)"
+################################################################################
+# Two values come from Terraform: the node IAM role the EC2NodeClass references, and
+# the weights bucket.
+#
+# Both can also be supplied through the environment, so the workshop can be run
+# against clusters that were not provisioned from this directory's Terraform state.
+################################################################################
+if [[ -n "${KARPENTER_NODE_IAM_ROLE_NAME:-}" ]]; then
+  echo "==> using KARPENTER_NODE_IAM_ROLE_NAME from the environment"
+  MODEL_BUCKET_TF="${MODEL_BUCKET:-}"
+elif [[ -f "${ROOT}/terraform/terraform.tfstate" ]] || terraform -chdir="${ROOT}/terraform" output >/dev/null 2>&1; then
+  echo "==> reading terraform outputs"
+  KARPENTER_NODE_IAM_ROLE_NAME="$(terraform -chdir="${ROOT}/terraform" output -raw karpenter_node_iam_role_name)"
+  MODEL_BUCKET_TF="$(terraform -chdir="${ROOT}/terraform" output -raw model_bucket)"
+else
+  echo "no terraform state in ${ROOT}/terraform and KARPENTER_NODE_IAM_ROLE_NAME is unset." >&2
+  echo "Either run terraform apply there, or export the value:" >&2
+  echo "  KARPENTER_NODE_IAM_ROLE_NAME=<role name> MODEL_BUCKET=<bucket> bin/prep.sh" >&2
+  exit 1
+fi
+
 echo "    karpenter node role : ${KARPENTER_NODE_IAM_ROLE_NAME}"
-echo "    model bucket        : ${MODEL_BUCKET_TF}"
+echo "    model bucket        : ${MODEL_BUCKET:-${MODEL_BUCKET_TF:-<unset>}}"
 
 if [[ -z "${MODEL_BUCKET}" ]]; then
-  echo "    NOTE: MODEL_BUCKET is empty in config.env. Set it to ${MODEL_BUCKET_TF} before phase 2."
+  echo "    NOTE: MODEL_BUCKET is empty. Set it in config.env before phase 2."
 fi
 
 echo "==> kubeconfig"
@@ -38,9 +55,9 @@ aws eks update-kubeconfig --region "${REGION}" --name "${AUTOMODE_CLUSTER}" --al
 ################################################################################
 # Assert the Bottlerocket AMI is new enough for SOCI.
 #
-# SOCI parallel pull/unpack landed in Bottlerocket 1.44.0. If variant C silently runs
-# on something older, the snapshotter setting is ignored and variant C measures the
-# same thing as the baseline variant -- a failure mode that looks like "SOCI does not help".
+# SOCI parallel pull/unpack landed in Bottlerocket 1.44.0. On an earlier version the
+# snapshotter setting is ignored and soci measures the same thing as baseline, which
+# would read as SOCI having no effect.
 ################################################################################
 echo "==> checking Bottlerocket version"
 K8S_VERSION="$(aws eks describe-cluster --region "${REGION}" --name "${KARPENTER_CLUSTER}" \
@@ -64,7 +81,7 @@ echo "    kubernetes ${K8S_VERSION}, bottlerocket nvidia ${BR_VERSION} (${BR_AMI
 python3 "${HERE}/assert_br_version.py" "bottlerocket-v${BR_VERSION}" 1.44.0
 
 ################################################################################
-# Variants A, B, C on the Karpenter cluster
+# baseline, snapshot and soci on the Karpenter cluster
 ################################################################################
 SNAPSHOT_ID=""
 if [[ -f "${ROOT}/results/snapshot-id.txt" ]]; then
@@ -86,7 +103,7 @@ render() {
     "${src}" > "${dst}"
 }
 
-echo "==> rendering + applying variants A/B/C to ${KARPENTER_CLUSTER}"
+echo "==> rendering + applying baseline, snapshot and soci to ${KARPENTER_CLUSTER}"
 for f in "${ROOT}"/manifests/karpenter/*.yaml; do
   base="$(basename "${f}")"
   if [[ "${base}" == *snapshot* && -z "${SNAPSHOT_ID}" ]]; then
@@ -113,13 +130,13 @@ kubectl --context "${KARPENTER_CLUSTER}" -n bench create configmap ttft-probe \
   --dry-run=client -o yaml | kubectl --context "${KARPENTER_CLUSTER}" -n bench apply -f -
 
 ################################################################################
-# Variant D on the Auto Mode cluster
+# automode on the Auto Mode cluster
 #
 # The built-in "default" NodeClass is read-only, so the custom NodeClass has to
 # reuse its node IAM role. Read it off the cluster rather than plumbing it
 # through Terraform -- this is the method the EKS docs give.
 ################################################################################
-echo "==> rendering + applying variant D to ${AUTOMODE_CLUSTER}"
+echo "==> rendering + applying automode to ${AUTOMODE_CLUSTER}"
 AUTOMODE_NODE_ROLE="$(kubectl --context "${AUTOMODE_CLUSTER}" get nodeclass default -o jsonpath='{.spec.role}')"
 echo "    auto mode node role : ${AUTOMODE_NODE_ROLE}"
 
