@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 #
-# Show what configuration makes one arm different, before running it.
+# Show what configuration makes one variant different, before running it.
 #
-#   bin/show_config.sh arm-b-snapshot
+#   bin/show_config.sh snapshot
 #
 # A timing figure on its own does not show how the result was produced. This prints
 # the field, the resource it belongs to, and the reason for it, so a participant can
 # apply the same configuration themselves.
 #
-# The diff is taken against the baseline arm and comments are stripped, so what
+# The diff is taken against the baseline variant and comments are stripped, so what
 # prints is only the configuration that actually differs. It reads the real rendered
 # manifests, not a copy, so it cannot drift from what is applied.
 
@@ -20,17 +20,17 @@ ROOT="$(cd "${HERE}/.." && pwd)"
 # shellcheck source=../config.env
 source "${ROOT}/config.env"
 
-ARM="${1:-}"
+VARIANT="${1:-}"
 RENDERED="${ROOT}/manifests/rendered"
 
 BOLD=$'\033[1m'; DIM=$'\033[2m'; CYAN=$'\033[36m'
 GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; RESET=$'\033[0m'
 
 usage() {
-  echo "usage: show_config.sh <arm-a-baseline|arm-b-snapshot|arm-c-soci|arm-d-automode|weights>" >&2
+  echo "usage: show_config.sh <baseline|snapshot|soci|automode|weights>" >&2
   exit 2
 }
-[[ -z "${ARM}" ]] && usage
+[[ -z "${VARIANT}" ]] && usage
 
 heading() { printf '\n%s%s%s\n' "${BOLD}${CYAN}" "$1" "${RESET}"; }
 why()     { printf '  %s%s%s\n' "${GREEN}" "$1" "${RESET}"; }
@@ -40,54 +40,57 @@ plain()   { printf '  %s\n' "$1"; }
 # Strip comments and blank lines so the diff shows configuration, not prose.
 strip() { grep -vE '^\s*#|^\s*$' "$1"; }
 
-# Drop lines that differ only because the arm is called something else -- resource
-# names, labels, tags. Without this filter those lines outnumber the one or two
-# lines of configuration that actually differ.
+# Drop lines that differ only because the variant is called something else: resource
+# names, labels and tags. Without this filter those lines outnumber the one or two lines
+# of configuration that differ.
+#
+# Matched on the key, not the value. Matching the value would also remove
+# `snapshotter = "soci"`, which is the setting the soci variant exists to demonstrate.
 drop_identity() {
-  grep -vE 'arm-a-baseline|arm-b-snapshot|arm-c-soci|arm-d-automode'
+  grep -vE '^[+-][[:space:]]*(name|workshop-variant):[[:space:]]*"?[a-z-]+"?[[:space:]]*$'
 }
 
 show_diff() {
-  local base="$1" arm="$2" label="$3"
-  if [[ ! -f "${base}" || ! -f "${arm}" ]]; then
+  local base="$1" variant="$2" label="$3"
+  if [[ ! -f "${base}" || ! -f "${variant}" ]]; then
     warn "rendered manifests not found -- run bin/prep.sh first"
     return 1
   fi
   heading "${label}"
   printf '%s' "${DIM}"
   printf '  %s\n' "--- $(basename "${base}")"
-  printf '  %s\n' "+++ $(basename "${arm}")"
+  printf '  %s\n' "+++ $(basename "${variant}")"
   printf '%s' "${RESET}"
-  diff -U0 <(strip "${base}") <(strip "${arm}") \
+  diff -U0 <(strip "${base}") <(strip "${variant}") \
     | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' \
     | drop_identity \
     | sed -e "s/^-/  ${RED}-/" -e "s/^+/  ${GREEN}+/" -e "s/$/${RESET}/"
-  printf '  %s(lines differing only by the arm name are omitted)%s\n' "${DIM}" "${RESET}"
+  printf '  %s(lines differing only by the variant name are omitted)%s\n' "${DIM}" "${RESET}"
 }
 
-BASE="${RENDERED}/10-arm-a-baseline.yaml"
+BASE="${RENDERED}/10-baseline.yaml"
 
-case "${ARM}" in
-  arm-a-baseline)
-    heading "Arm A -- the baseline. Nothing is configured."
+case "${VARIANT}" in
+  baseline)
+    heading "baseline -- nothing is configured"
     plain ""
     why "Bottlerocket with its default settings. Two EBS volumes: a small control"
     why "volume, and a data volume that holds container images and logs. containerd"
     why "pulls layers one at a time with its default snapshotter."
     plain ""
-    plain "The node class is worth reading because the later arms modify it:"
+    plain "The node class is worth reading because the later variants modify it:"
     plain ""
     grep -A12 'blockDeviceMappings:' "${BASE}" 2>/dev/null | grep -vE '^\s*#' | sed 's/^/    /'
     plain ""
     why "deviceName /dev/xvda -> Bottlerocket's control volume (OS)"
     why "deviceName /dev/xvdb -> the data volume: container images live here"
     plain ""
-    plain "The other arms change how that second volume is used."
+    plain "The other variants change how that second volume is used."
     ;;
 
-  arm-b-snapshot)
-    show_diff "${BASE}" "${RENDERED}/11-arm-b-snapshot.yaml" \
-      "Arm B -- one field added to the data volume"
+  snapshot)
+    show_diff "${BASE}" "${RENDERED}/11-snapshot.yaml" \
+      "snapshot -- one field added to the data volume"
     plain ""
     why "snapshotID on /dev/xvdb"
     plain "    Restores the data volume from an EBS snapshot that already contains the"
@@ -95,16 +98,16 @@ case "${ARM}" in
     plain ""
     why "encrypted: true is not set here"
     plain "    A volume restored from a snapshot inherits the snapshot's encryption."
-    plain "    The snapshot came from arm A's encrypted volume, so this volume is"
+    plain "    The snapshot came from the baseline's encrypted volume, so this volume is"
     plain "    encrypted. Setting the field as well has no additional effect."
     plain ""
     warn "Note what is NOT here: instanceStorePolicy."
-    plain "    Arm B needs the images on the volume restored from the snapshot. Adding"
-    plain "    instanceStorePolicy moves container storage to local NVMe, and the"
+    plain "    This variant needs the images on the volume restored from the snapshot."
+    plain "    Adding instanceStorePolicy moves container storage to local NVMe, and the"
     plain "    restored volume is then unused."
     plain ""
     plain "  Where the snapshot comes from:"
-    plain "    bin/bench.sh arm-a-baseline        # leaves a node with the image pulled"
+    plain "    bin/bench.sh baseline        # leaves a node with the image pulled"
     plain "    snapshot/snapshot-from-node.sh     # snapshots that node's /dev/xvdb"
     plain ""
     if [[ -f "${ROOT}/results/snapshot-id.txt" ]]; then
@@ -114,9 +117,9 @@ case "${ARM}" in
     fi
     ;;
 
-  arm-c-soci)
-    show_diff "${BASE}" "${RENDERED}/12-arm-c-soci.yaml" \
-      "Arm C -- two additions"
+  soci)
+    show_diff "${BASE}" "${RENDERED}/12-soci.yaml" \
+      "soci -- two additions"
     plain ""
     why "instanceStorePolicy: RAID0"
     plain "    Karpenter builds a RAID0 array from the instance's NVMe disks and moves"
@@ -132,15 +135,15 @@ case "${ARM}" in
     plain ""
     warn "Requires Bottlerocket >= 1.44.0. On an earlier version the snapshotter"
     warn "setting is ignored without an error: the node boots, the pod runs, and"
-    warn "this arm measures the same thing as arm A. bin/prep.sh checks the version."
+    warn "this variant measures the same thing as the baseline. bin/prep.sh checks it."
     plain ""
     plain "  The image is unmodified. No SOCI index to build, no registry change,"
     plain "  no build-pipeline change."
     ;;
 
-  arm-d-automode)
-    show_diff "${RENDERED}/12-arm-c-soci.yaml" "${RENDERED}/13-arm-d-automode.yaml" \
-      "Arm D -- compared with arm C"
+  automode)
+    show_diff "${RENDERED}/12-soci.yaml" "${RENDERED}/13-automode.yaml" \
+      "automode -- compared with soci"
     plain ""
     why "Absent: instanceStorePolicy, the userData block, blockDeviceMappings."
     plain "    On a GPU instance with local NVMe, EKS Auto Mode formats the NVMe, puts"
@@ -153,7 +156,7 @@ case "${ARM}" in
     plain ""
     warn "Two things Auto Mode cannot do:"
     warn "  1. No snapshotID. ephemeralStorage is size/iops/throughput/kmsKeyID only,"
-    warn "     so arm B's mechanism is unavailable here."
+    warn "     so the snapshot mechanism is unavailable here."
     warn "  2. The SOCI settings are not exposed. The service defaults apply."
     plain ""
     plain "  Also note the API group differs: eks.amazonaws.com/v1 NodeClass, not"
@@ -201,10 +204,10 @@ esac
 printf '\n%s' "${YELLOW}"
 printf '  %s\n' "Apply and measure:"
 printf '%s' "${RESET}"
-case "${ARM}" in
+case "${VARIANT}" in
   weights) printf '    bin/bench.sh weights <variant>\n' ;;
   *)       printf '    bin/prep.sh          # applies the node class and node pool\n'
-           printf '    bin/bench.sh %s\n' "${ARM}" ;;
+           printf '    bin/bench.sh %s\n' "${VARIANT}" ;;
 esac
 printf '  %sThen prove the setting took effect:%s\n' "${YELLOW}" "${RESET}"
-printf '    bin/verify_config.sh %s\n\n' "${ARM}"
+printf '    bin/verify_config.sh %s\n\n' "${VARIANT}"

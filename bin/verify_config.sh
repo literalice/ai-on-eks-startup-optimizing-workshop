@@ -2,7 +2,7 @@
 #
 # Prove the configuration took effect, independently of the timing number.
 #
-#   bin/verify_config.sh arm-c-soci
+#   bin/verify_config.sh soci
 #
 # A faster number is not proof that your setting is what made it faster. This checks
 # the mechanism directly: that the volume really came from the snapshot, that
@@ -11,7 +11,7 @@
 # Each check states what it confirms and what it does not, so that a check is not
 # read as covering more than it does.
 #
-# Run it after the arm, while the node is still up.
+# Run it after the variant, while the node is still up.
 
 set -uo pipefail
 
@@ -21,7 +21,7 @@ ROOT="$(cd "${HERE}/.." && pwd)"
 # shellcheck source=../config.env
 source "${ROOT}/config.env"
 
-ARM="${1:-}"
+VARIANT="${1:-}"
 
 BOLD=$'\033[1m'; DIM=$'\033[2m'; CYAN=$'\033[36m'
 GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; RESET=$'\033[0m'
@@ -33,15 +33,15 @@ if [[ -n "${REHEARSAL_DIR:-}" ]]; then
   printf '\n%s  Verification is skipped in a rehearsal.%s\n' "${BOLD}${YELLOW}" "${RESET}"
   printf '  Every check here reads real cluster and EC2 state. Fixture values would\n'
   printf '  report a configuration as confirmed without checking it.\n'
-  printf '  Run it against a real cluster after %s.\n\n' "bin/bench.sh ${ARM:-<arm>}"
+  printf '  Run it against a real cluster after %s.\n\n' "bin/bench.sh ${VARIANT:-<variant>}"
   exit 0
 fi
 
 usage() {
-  echo "usage: verify_config.sh <arm-a-baseline|arm-b-snapshot|arm-c-soci|arm-d-automode|weights>" >&2
+  echo "usage: verify_config.sh <baseline|snapshot|soci|automode|weights>" >&2
   exit 2
 }
-[[ -z "${ARM}" ]] && usage
+[[ -z "${VARIANT}" ]] && usage
 
 heading() { printf '\n%s%s%s\n' "${BOLD}${CYAN}" "$1" "${RESET}"; }
 pass()    { printf '  %s[ok]%s   %s\n' "${GREEN}" "${RESET}" "$1"; }
@@ -49,11 +49,11 @@ fail()    { printf '  %s[!!]%s   %s\n' "${RED}" "${RESET}" "$1"; }
 info()    { printf '         %s\n' "$1"; }
 limit()   { printf '  %sproves%s %s\n' "${DIM}" "${RESET}" "$1"; }
 
-case "${ARM}" in
-  arm-d-automode) CONTEXT="${AUTOMODE_CLUSTER}"; POOL="arm-d-automode" ;;
-  weights)        CONTEXT="${KARPENTER_CLUSTER}"; POOL="arm-c-soci" ;;
-  arm-a-baseline|arm-b-snapshot|arm-c-soci)
-                  CONTEXT="${KARPENTER_CLUSTER}"; POOL="${ARM}" ;;
+case "${VARIANT}" in
+  automode) CONTEXT="${AUTOMODE_CLUSTER}"; POOL="automode" ;;
+  weights)        CONTEXT="${KARPENTER_CLUSTER}"; POOL="soci" ;;
+  baseline|snapshot|soci)
+                  CONTEXT="${KARPENTER_CLUSTER}"; POOL="${VARIANT}" ;;
   *) usage ;;
 esac
 
@@ -66,11 +66,11 @@ PROVIDER_ID="$(kubectl --context "${CONTEXT}" get nodeclaims \
 INSTANCE_ID="${PROVIDER_ID##*/}"
 
 if [[ -z "${NODE}" ]]; then
-  fail "no node up for ${POOL} -- run bin/bench.sh ${ARM} first and do not reset"
+  fail "no node up for ${POOL} -- run bin/bench.sh ${VARIANT} first and do not reset"
   exit 1
 fi
 
-heading "The node that ran ${ARM}"
+heading "The node that ran ${VARIANT}"
 kubectl --context "${CONTEXT}" get node "${NODE}" \
   -o custom-columns='NAME:.metadata.name,TYPE:.metadata.labels.node\.kubernetes\.io/instance-type,ZONE:.metadata.labels.topology\.kubernetes\.io/zone,OS:.status.nodeInfo.osImage,RUNTIME:.status.nodeInfo.containerRuntimeVersion' \
   2>/dev/null | sed 's/^/  /'
@@ -101,19 +101,19 @@ else
   info "if the node is very fresh, kubelet may not have reported it yet -- retry"
 fi
 
-case "${ARM}" in
-  arm-a-baseline|arm-b-snapshot)
+case "${VARIANT}" in
+  baseline|snapshot)
     if [[ -z "${CAP_GB}" ]]; then
       info "skipping the EBS-versus-NVMe check without a capacity reading"
     elif (( CAP_GB < 200 )); then
-      pass "~${CAP_GB} GB is the EBS data volume, as configured for this arm"
+      pass "~${CAP_GB} GB is the EBS data volume, as configured for this variant"
       limit "container storage is on EBS, not local NVMe"
     else
       fail "~${CAP_GB} GB is larger than the EBS data volume -- storage may be on NVMe"
-      info "check instanceStorePolicy is absent from this arm's node class"
+      info "check instanceStorePolicy is absent from this variant's node class"
     fi
     ;;
-  arm-c-soci|arm-d-automode|weights)
+  soci|automode|weights)
     if [[ -z "${CAP_GB}" ]]; then
       info "skipping the EBS-versus-NVMe check without a capacity reading"
     elif (( CAP_GB > 200 )); then
@@ -121,17 +121,17 @@ case "${ARM}" in
       limit "container storage moved to instance store as intended"
     else
       fail "~${CAP_GB} GB looks like EBS -- NVMe was not picked up"
-      info "arm C: check instanceStorePolicy: RAID0. arm D: check ephemeralStorage.size"
+      info "variant C: check instanceStorePolicy: RAID0. variant D: check ephemeralStorage.size"
       info "is BELOW the instance's NVMe capacity, which is what triggers Auto Mode"
     fi
     ;;
 esac
 
 ################################################################################
-# Arm-specific proof
+# Variant-specific check
 ################################################################################
-case "${ARM}" in
-  arm-b-snapshot)
+case "${VARIANT}" in
+  snapshot)
     heading "Did the data volume really come from the snapshot?"
     WANT="$(tr -d '[:space:]' < "${ROOT}/results/snapshot-id.txt" 2>/dev/null || true)"
     GOT="$(aws ec2 describe-instances --region "${REGION}" --instance-ids "${INSTANCE_ID}" \
@@ -160,9 +160,9 @@ case "${ARM}" in
     fi
     ;;
 
-  arm-c-soci)
+  soci)
     heading "Did the SOCI settings reach the node?"
-    UD="$(kubectl --context "${CONTEXT}" get ec2nodeclass arm-c-soci \
+    UD="$(kubectl --context "${CONTEXT}" get ec2nodeclass soci \
       -o jsonpath='{.spec.userData}' 2>/dev/null || true)"
     if grep -q 'snapshotter = "soci"' <<< "${UD}"; then
       pass "the node class carries snapshotter = \"soci\""
@@ -171,7 +171,7 @@ case "${ARM}" in
       printf '  %snot proved%s %s\n' "${DIM}" "${RESET}" \
         "that SOCI ran -- Bottlerocket has no shell to check from."
       info "The behavioural evidence is the throughput figure: if SOCI were being"
-      info "ignored, arm C would land on arm A's MB/s. That is the check that matters."
+      info "ignored, variant C would land on the baseline throughput. That is the check that matters."
     else
       fail "userData does not contain the SOCI snapshotter setting"
     fi
@@ -185,23 +185,23 @@ case "${ARM}" in
       pass "${VER} >= 1.44.0, so parallel pull/unpack exists in this image"
     else
       fail "${VER:-unknown} is below 1.44.0 -- the SOCI setting is being ignored"
-      info "this arm is measuring the same thing as arm A"
+      info "this variant is measuring the same thing as the baseline variant"
     fi
     ;;
 
-  arm-d-automode)
+  automode)
     heading "Did Auto Mode do it without being told?"
-    SPEC="$(kubectl --context "${CONTEXT}" get nodeclass arm-d-automode -o json 2>/dev/null)"
+    SPEC="$(kubectl --context "${CONTEXT}" get nodeclass automode -o json 2>/dev/null)"
     for field in userData instanceStorePolicy blockDeviceMappings; do
       if grep -q "\"${field}\"" <<< "${SPEC}"; then
-        fail "${field} is present -- this arm is supposed to configure nothing"
+        fail "${field} is present -- this variant is supposed to configure nothing"
       else
         pass "no ${field} in the node class"
       fi
     done
     limit "the NVMe and parallel pull above came from the service, not from us"
     info "ephemeralStorage as declared:"
-    kubectl --context "${CONTEXT}" get nodeclass arm-d-automode \
+    kubectl --context "${CONTEXT}" get nodeclass automode \
       -o jsonpath='{.spec.ephemeralStorage}' 2>/dev/null | sed 's/^/           /'
     printf '\n'
     ;;
@@ -245,9 +245,9 @@ case "${ARM}" in
     fi
     ;;
 
-  arm-a-baseline)
+  baseline)
     heading "Confirm nothing is configured"
-    SPEC="$(kubectl --context "${CONTEXT}" get ec2nodeclass arm-a-baseline -o json 2>/dev/null)"
+    SPEC="$(kubectl --context "${CONTEXT}" get ec2nodeclass baseline -o json 2>/dev/null)"
     for field in userData instanceStorePolicy snapshotID; do
       if grep -q "\"${field}\"" <<< "${SPEC}"; then
         fail "${field} is present -- this is not a clean baseline"
@@ -255,9 +255,9 @@ case "${ARM}" in
         pass "no ${field}"
       fi
     done
-    limit "every later arm's gain is attributable to what it added"
+    limit "every later variant's gain is attributable to what it added"
     ;;
 esac
 
-printf '\n%s  Next: bin/show_config.sh <arm> to see what the next arm changes.%s\n\n' \
+printf '\n%s  Next: bin/show_config.sh <variant> to see what the next variant changes.%s\n\n' \
   "${YELLOW}" "${RESET}"

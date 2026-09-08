@@ -10,12 +10,12 @@ steps have figures to be compared against.
 
 ## What you configure / 設定するもの
 
-Nothing. This arm runs Bottlerocket with its default settings.
+Nothing. This variant runs Bottlerocket with its default settings.
 
-何も設定しません。この arm は Bottlerocket を既定設定で動かします。
+何も設定しません。この variant は Bottlerocket を既定設定で動かします。
 
 The node class is worth reading because the later steps modify it. From
-[`manifests/karpenter/10-arm-a-baseline.yaml`](../manifests/karpenter/10-arm-a-baseline.yaml):
+[`manifests/karpenter/10-baseline.yaml`](../manifests/karpenter/10-baseline.yaml):
 
 node class は以降のステップで変更するため、内容を確認しておきます。
 
@@ -23,7 +23,7 @@ node class は以降のステップで変更するため、内容を確認して
 apiVersion: karpenter.k8s.aws/v1
 kind: EC2NodeClass
 metadata:
-  name: arm-a-baseline
+  name: baseline
 spec:
   amiSelectorTerms:
     - alias: bottlerocket@latest       # resolves the -nvidia variant for GPU types
@@ -48,7 +48,7 @@ spec:
 | `alias: bottlerocket@latest` | Karpenter resolves the `aws-k8s-<version>-nvidia` variant for GPU instance types. That AMI contains the NVIDIA driver, the container toolkit and the Kubernetes device plugin, so no device plugin needs to be deployed.<br>GPU インスタンスタイプでは Karpenter が `-nvidia` variant を解決します。この AMI にはドライバ、container toolkit、Kubernetes device plugin が含まれるため、device plugin のデプロイは不要です。 |
 | `/dev/xvda` | Bottlerocket's control volume, which holds the OS. It is small because the OS is immutable.<br>OS を保持する control ボリューム。OS がイミュータブルなため小容量です。 |
 | `/dev/xvdb` | The data volume. Container images and logs are stored here. The later steps change how this volume is used.<br>データボリューム。コンテナイメージとログが保存されます。以降のステップはこのボリュームの使い方を変更します。 |
-| `iops` and `throughput` at the gp3 maximum | So that a difference between arms is not caused by volume performance. Keep these values the same in every arm.<br>arm 間の差がボリューム性能に起因しないようにするためです。全 arm で同じ値にしてください。 |
+| `iops` and `throughput` at the gp3 maximum | So that a difference between variants is not caused by volume performance. Keep these values the same in every variant.<br>variant 間の差がボリューム性能に起因しないようにするためです。全 variant で同じ値にしてください。 |
 
 ---
 
@@ -56,8 +56,8 @@ spec:
 
 ```bash
 bin/prep.sh                    # applies the node class and node pool
-bin/show_config.sh arm-a-baseline
-bin/bench.sh arm-a-baseline
+bin/show_config.sh baseline
+bin/bench.sh baseline
 ```
 
 Each step's figure prints as it completes. The image pull stage is the one that takes
@@ -77,17 +77,17 @@ noticeably longer than the others:
 ## Verify / 検証
 
 ```bash
-bin/verify_config.sh arm-a-baseline
+bin/verify_config.sh baseline
 ```
 
 This confirms that `userData`, `instanceStorePolicy` and `snapshotID` are all absent,
 and that the node's ephemeral-storage capacity corresponds to the EBS data volume
-rather than local NVMe. With those confirmed, any improvement in a later arm can be
-attributed to what that arm added.
+rather than local NVMe. With those confirmed, any improvement in a later variant can be
+attributed to what that variant added.
 
 `userData`、`instanceStorePolicy`、`snapshotID` がいずれも無いこと、およびノードの
 ephemeral-storage 容量がローカル NVMe ではなく EBS データボリュームに対応することを
-確認します。これらを確認しておくと、以降の arm の改善をその arm が追加した内容に
+確認します。これらを確認しておくと、以降の variant の改善をその variant が追加した内容に
 帰属できます。
 
 ---

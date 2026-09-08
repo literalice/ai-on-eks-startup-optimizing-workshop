@@ -1,19 +1,19 @@
 ################################################################################
-# Arm D -- EKS Auto Mode, nothing configured
+# automode -- EKS Auto Mode, nothing configured
 #
-# Compare this file to arm C. There is no userData, no snapshotter setting, no
+# Compare this file to soci. There is no userData, no snapshotter setting, no
 # instanceStorePolicy, no block device mapping. On a GPU instance with local
 # NVMe, Auto Mode formats the NVMe (RAID 0 across multiple drives), puts
 # ephemeral container storage on it, and pulls and unpacks images in parallel.
-# That is the whole of arm C's configuration, done by the service.
+# That is the whole of the SOCI variant's configuration, done by the service.
 #
-# Two things this arm cannot do, and both belong on the record:
+# Two things this variant cannot do:
 #
 #   1. There is no snapshotID. Auto Mode's NodeClass exposes ephemeralStorage as
-#      size / iops / throughput / kmsKeyID only, so arm B's mechanism is not
+#      size / iops / throughput / kmsKeyID only, so the snapshot mechanism is not
 #      available here. If pre-baked images are the answer for a given workload,
 #      that workload does not go on Auto Mode.
-#   2. The SOCI tuning knobs from arm C are not exposed. You get the service's
+#   2. The SOCI settings from soci are not exposed. The service's defaults
 #      defaults.
 #
 # ephemeralStorage.size is deliberately left below the instance's NVMe capacity.
@@ -28,7 +28,7 @@
 apiVersion: eks.amazonaws.com/v1
 kind: NodeClass
 metadata:
-  name: arm-d-automode
+  name: automode
 spec:
   role: "@NODE_IAM_ROLE@"
   ephemeralStorage:
@@ -40,12 +40,12 @@ spec:
     - tags:
         aws:eks:cluster-name: "@CLUSTER_NAME@"
   tags:
-    workshop-arm: arm-d-automode
+    workshop-variant: automode
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
-  name: arm-d-automode
+  name: automode
 spec:
   disruption:
     consolidationPolicy: WhenEmpty
@@ -55,12 +55,12 @@ spec:
   template:
     metadata:
       labels:
-        workshop-arm: arm-d-automode
+        workshop-variant: automode
     spec:
       nodeClassRef:
         group: eks.amazonaws.com
         kind: NodeClass
-        name: arm-d-automode
+        name: automode
       taints:
         - key: nvidia.com/gpu
           effect: NoSchedule

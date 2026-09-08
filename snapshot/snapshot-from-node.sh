@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 #
-# Build the arm B snapshot from a node that has already pulled the image.
+# Build the snapshot variant's EBS snapshot from a node that has already pulled the image.
 #
-#   bin/bench.sh arm-a-baseline          # leaves a node with the image cached
+#   bin/bench.sh baseline          # leaves a node with the image cached
 #   snapshot/snapshot-from-node.sh       # snapshot that node's data volume
 #
 # Why this instead of aws-samples/bottlerocket-images-cache: that script launches
@@ -14,8 +14,8 @@
 # Using a node the workshop already produced is faster, and the cached layers are
 # written by the same containerd and OS version that will later read them.
 #
-# Requirements: an arm A (or any non-NVMe) node must be up with the image pulled.
-# Arm C is not a valid source -- instanceStorePolicy moves container storage to
+# Requirements: a baseline (or any non-NVMe) node must be up with the image pulled.
+# The SOCI variant is not a valid source -- instanceStorePolicy moves container storage to
 # local NVMe, so its EBS data volume is empty.
 
 set -euo pipefail
@@ -26,7 +26,7 @@ ROOT="$(cd "${HERE}/.." && pwd)"
 # shellcheck source=../config.env
 source "${ROOT}/config.env"
 
-SOURCE_NODEPOOL="${SOURCE_NODEPOOL:-arm-a-baseline}"
+SOURCE_NODEPOOL="${SOURCE_NODEPOOL:-baseline}"
 DATA_DEVICE="${DATA_DEVICE:-/dev/xvdb}"
 
 echo "==> finding a node for ${SOURCE_NODEPOOL}"
@@ -52,7 +52,7 @@ VOLUME_ID="$(aws ec2 describe-instances \
 
 if [[ -z "${VOLUME_ID}" || "${VOLUME_ID}" == "None" ]]; then
   echo "no ${DATA_DEVICE} on ${INSTANCE_ID}." >&2
-  echo "If this is an NVMe arm (arm C), its container storage is not on EBS." >&2
+  echo "If this is an NVMe variant (soci), its container storage is not on EBS." >&2
   exit 1
 fi
 echo "    volume ${VOLUME_ID}"
@@ -65,7 +65,7 @@ echo "==> creating snapshot"
 SNAPSHOT_ID="$(aws ec2 create-snapshot \
   --region "${REGION}" \
   --volume-id "${VOLUME_ID}" \
-  --description "Bottlerocket data volume with ${WORKLOAD_IMAGE} pre-pulled (workshop arm B)" \
+  --description "Bottlerocket data volume with ${WORKLOAD_IMAGE} pre-pulled (workshop snapshot variant)" \
   --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=${NAME_PREFIX}-image-cache},{Key=Purpose,Value=bottlerocket-startup-workshop}]" \
   --query 'SnapshotId' --output text)"
 echo "    ${SNAPSHOT_ID}"
@@ -81,4 +81,4 @@ printf '%s\n' "${SNAPSHOT_ID}" > "${ROOT}/results/snapshot-id.txt"
 
 echo
 echo "==> written to results/snapshot-id.txt"
-echo "==> now run bin/prep.sh to apply the arm B node class, then bin/bench.sh arm-b-snapshot"
+echo "==> now run bin/prep.sh to apply the snapshot node class, then bin/bench.sh snapshot"

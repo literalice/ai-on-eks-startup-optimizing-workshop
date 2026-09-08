@@ -10,11 +10,11 @@ than once per pod.
 
 ## Why this measurement / この計測を行う理由
 
-The four arms all measure the first pod on a new node. When a deployment scales out,
+The four variants all measure the first pod on a new node. When a deployment scales out,
 some pods are scheduled onto nodes that are already running, where the image is already
 in the node's cache. Those pods do not incur the provisioning or pull stages.
 
-4 つの arm はいずれも、新しいノードでの 1 個目の Pod を計測しています。Deployment が
+4 つの variant はいずれも、新しいノードでの 1 個目の Pod を計測しています。Deployment が
 スケールアウトするとき、一部の Pod はすでに動いているノードにスケジュールされ、そのノードの
 キャッシュにイメージがあります。その Pod にはプロビジョニングと pull の段階は発生しません。
 
@@ -27,7 +27,7 @@ This step changes the run command, not the configuration:
 このステップで変わるのは実行コマンドで、設定ではありません。
 
 ```bash
-bin/bench.sh arm-c-soci --warm
+bin/bench.sh soci --warm
 ```
 
 | Cold run (default) | Warm run (`--warm`) |
@@ -35,11 +35,11 @@ bin/bench.sh arm-c-soci --warm
 | Deletes the NodeClaim, which terminates the instance and discards its image cache<br>NodeClaim を削除し、インスタンスを終了してイメージキャッシュを破棄 | Deletes the pod only, keeping the NodeClaim and the node<br>Pod のみを削除し、NodeClaim とノードは残す |
 | Measures provisioning, pull and start<br>プロビジョニング、pull、起動を計測 | Measures start only<br>起動のみを計測 |
 
-Run this immediately after the cold run of the same arm, while that node is still
+Run this immediately after the cold run of the same variant, while that node is still
 present. The node pool's `consolidateAfter` is 30 minutes. If the node has been
 removed, `bench.sh` reports that the result will not be a warm measurement.
 
-同じ arm の cold 実行直後、そのノードが残っている間に実行してください。node pool の
+同じ variant の cold 実行直後、そのノードが残っている間に実行してください。node pool の
 `consolidateAfter` は 30 分です。ノードが削除されている場合、`bench.sh` は warm な計測に
 ならないことを報告します。
 
@@ -92,7 +92,7 @@ bin/report.py
 ```
 
 ```
-  arm-c-soci: cold 97s -> warm 1s (once-per-node cost 96s)
+  soci: cold 97s -> warm 1s (once-per-node cost 96s)
 ```
 
 The last figure is the portion of the cold measurement that a node which is already
@@ -110,10 +110,10 @@ follow from this.
 参考計測では、97 秒のうち 96 秒がノード 1 台につき 1 回発生する分でした。ここから 2 点が
 分かります。
 
-1. Arm B's improvement applies to the first pod on a node. It has no effect on a pod
+1. The snapshot variant's improvement applies to the first pod on a node. It has no effect on a pod
    scheduled onto a node that already has the image. Comparing only cold figures would
    overstate how much of your total startup time it addresses.
-   arm B の改善はノードの 1 個目の Pod に適用されます。イメージを持つノードにスケジュール
+   snapshot の改善はノードの 1 個目の Pod に適用されます。イメージを持つノードにスケジュール
    された Pod には効果がありません。cold の数字だけを比べると、起動時間全体に対して
    カバーする範囲を大きく見積もることになります。
 2. If most pods in your workload are scheduled onto nodes that are already running, the

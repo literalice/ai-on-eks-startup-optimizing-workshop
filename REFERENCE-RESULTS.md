@@ -30,13 +30,13 @@ workshop.
 
 ## Phase 1 — how the image reaches the node / イメージの届き方
 
-| Arm | Provisioning | Image | Workload | Start to Ready | Throughput |
+| Variant | Provisioning | Image | Workload | Start to Ready | Throughput |
 |---|---:|---:|---:|---:|---:|
-| `arm-a-baseline` | 29s | 95s | 1s | 125s | 98 MB/s |
-| `arm-b-snapshot` | 40s | 0s (no pull) | 10s | 50s | — |
-| `arm-c-soci` | 33s | 62s | 2s | 97s | 151 MB/s |
-| `arm-d-automode` | 35s | 57s | 2s | 94s | 164 MB/s |
-| `arm-c-soci-warm` | 0s | 0s (no pull) | 1s | 1s | — |
+| `baseline` | 29s | 95s | 1s | 125s | 98 MB/s |
+| `snapshot` | 40s | 0s (no pull) | 10s | 50s | — |
+| `soci` | 33s | 62s | 2s | 97s | 151 MB/s |
+| `automode` | 35s | 57s | 2s | 94s | 164 MB/s |
+| `soci-warm` | 0s | 0s (no pull) | 1s | 1s | — |
 
 Throughput is the compressed image size divided by the observed pull duration, so it
 includes both download and unpack. It can be compared across environments with
@@ -47,19 +47,19 @@ different image sizes.
 
 ### Observations / 観察された内容
 
-Provisioning took 29 to 40 seconds and was similar across the four arms. The image pull
-varied between arms, and in the baseline it was longer than all other stages combined.
+Provisioning took 29 to 40 seconds and was similar across the four variants. The image pull
+varied between variants, and in the baseline it was longer than all other stages combined.
 
-プロビジョニングは 29〜40 秒で、4 arm でほぼ同じでした。イメージ pull は arm 間で変動し、
+プロビジョニングは 29〜40 秒で、4 variant でほぼ同じでした。イメージ pull は variant 間で変動し、
 ベースラインでは他の全段階の合計より長くなっています。
 
-Arm D reached the same throughput range as arm C without any of arm C's configuration.
-Arm C required `instanceStorePolicy: RAID0` and six lines of Bottlerocket settings; arm
-D required neither. The throughput difference between the two, 164 against 151 MB/s, is
+The Auto Mode variant reached the same throughput range as the SOCI variant without any of its configuration.
+The soci variant required `instanceStorePolicy: RAID0` and six lines of Bottlerocket
+settings; automode required neither. The throughput difference between the two, 164 against 151 MB/s, is
 within the run-to-run variation shown in the repeatability section below.
 
-arm D は arm C の設定を一切行わずに、arm C と同じスループット帯に達しました。arm C は
-`instanceStorePolicy: RAID0` と Bottlerocket 設定 6 行を必要とし、arm D はどちらも不要です。
+automode は soci の設定を一切行わずに、soci と同じスループット帯に達しました。soci は
+`instanceStorePolicy: RAID0` と Bottlerocket 設定 6 行を必要とし、Auto Mode 版はどちらも不要です。
 両者のスループット差（164 対 151 MB/s）は、後述の再現性セクションに示す実行ごとのばらつきの
 範囲内です。
 
@@ -80,12 +80,12 @@ not included in the table.
 
 The warm run went from 97 seconds to 1 second, so 96 seconds of the cold measurement was
 incurred once per node rather than once per pod. For a workload where most pods are
-scheduled onto nodes that are already running, the mechanisms in arms B, C and D affect
+scheduled onto nodes that are already running, the snapshot, SOCI and Auto Mode variants affect
 a small part of the total startup time.
 
 warm 実行は 97 秒から 1 秒になり、cold の計測のうち 96 秒が Pod ごとではなくノード 1 台に
 つき 1 回発生する分でした。Pod の大半がすでに動いているノードにスケジュールされる
-ワークロードでは、arm B / C / D の各方式が影響するのは起動時間全体の一部です。
+ワークロードでは、snapshot / soci / automode の各方式が影響するのは起動時間全体の一部です。
 
 ## Phase 2 — how the weights reach GPU memory / ウェイトの届き方
 
@@ -141,13 +141,13 @@ Phase 1 was run twice, several hours apart, with newly provisioned nodes each ti
 
 フェーズ 1 は数時間の間隔をあけて 2 回、いずれも新規に起動したノードで実行しました。
 
-| Arm | Run 1 | Run 2 | Difference |
+| Variant | Run 1 | Run 2 | Difference |
 |---|---:|---:|---:|
-| `arm-a-baseline` | 127s | 125s | 1.6% |
-| `arm-b-snapshot` | 46s | 50s | 8.7% |
-| `arm-c-soci` | 89s | 97s | 9.0% |
-| `arm-d-automode` | 89s | 94s | 5.6% |
-| `arm-c-soci-warm` | 2s | 1s | — |
+| `baseline` | 127s | 125s | 1.6% |
+| `snapshot` | 46s | 50s | 8.7% |
+| `soci` | 89s | 97s | 9.0% |
+| `automode` | 89s | 94s | 5.6% |
+| `soci-warm` | 2s | 1s | — |
 | `weights-runai-s3` | 83s | 82s | 1.2% |
 
 All differences were within about 9%, which is the basis for treating a difference below
@@ -156,9 +156,9 @@ about 10% as requiring a repeat run before being relied on.
 差はいずれも約 9% 以内でした。10% 程度未満の差については、再実行で確認してから判断する
 根拠になります。
 
-In run 1, arms C and D were both 89 seconds. In run 2 they were 97 and 94 seconds. The
+In run 1, the SOCI and Auto Mode variants were both 89 seconds. In run 2 they were 97 and 94 seconds. The
 ordering between them was not the same in both runs, so these figures do not show one to
 be faster than the other.
 
-1 回目は arm C と D がともに 89 秒、2 回目は 97 秒と 94 秒でした。arm C と arm D の順序は
+1 回目は soci と automode がともに 89 秒、2 回目は 97 秒と 94 秒でした。soci と automode の順序は
 2 回で同じではないため、これらの数字からどちらが速いとは言えません。

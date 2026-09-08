@@ -29,14 +29,14 @@ leaves such a node, so do not run `reset.sh` before this:
 ノードがその状態なので、その前に `reset.sh` を実行しないでください。
 
 ```bash
-bin/bench.sh arm-a-baseline          # run again if you have already reset
+bin/bench.sh baseline          # run again if you have already reset
 snapshot/snapshot-from-node.sh       # takes 3-5 minutes
 ```
 
 The script does the following / スクリプトの動作:
 
-1. finds the node for the `arm-a-baseline` node pool
-   `arm-a-baseline` node pool のノードを見つける
+1. finds the node for the `baseline` node pool
+   `baseline` node pool のノードを見つける
 2. locates that instance's `/dev/xvdb` volume
    そのインスタンスの `/dev/xvdb` ボリュームを特定する
 3. calls `aws ec2 create-snapshot` on the volume and waits for it to complete
@@ -44,14 +44,14 @@ The script does the following / スクリプトの動作:
 4. writes the snapshot ID to `results/snapshot-id.txt`
    スナップショット ID を `results/snapshot-id.txt` に書き込む
 
-> The node must be an arm A node. Arm C sets `instanceStorePolicy`, which moves
-> container storage to local NVMe, so an arm C node's EBS data volume is empty.
-> Snapshotting it produces an empty snapshot, and arm B then pulls the image as
+> The node must be a baseline node. The SOCI variant sets `instanceStorePolicy`, which moves
+> container storage to local NVMe, so the soci variant's EBS data volume is empty.
+> Snapshotting it produces an empty snapshot, and the snapshot variant then pulls the image as
 > normal.
 >
-> 対象は arm A のノードである必要があります。arm C は `instanceStorePolicy` を設定して
-> コンテナストレージをローカル NVMe に移すため、arm C ノードの EBS データボリュームは
-> 空です。これをスナップショットすると空のスナップショットができ、arm B は通常どおり
+> 対象は baseline のノードである必要があります。soci は `instanceStorePolicy` を設定して
+> コンテナストレージをローカル NVMe に移すため、soci のノードの EBS データボリュームは
+> 空です。これをスナップショットすると空のスナップショットができ、snapshot は通常どおり
 > pull します。
 
 > `snapshot/build-snapshot.sh` did not work in our environment. It wraps
@@ -71,7 +71,7 @@ The script does the following / スクリプトの動作:
 ## Part B — the configuration change / 設定変更
 
 One field is added. Compare
-[`11-arm-b-snapshot.yaml`](../manifests/karpenter/11-arm-b-snapshot.yaml) with step 1's
+[`11-snapshot.yaml`](../manifests/karpenter/11-snapshot.yaml) with step 1's
 node class:
 
 追加するフィールドは 1 つです。
@@ -106,12 +106,12 @@ be entered manually.
 
 ### What is not set / 設定しないもの
 
-`instanceStorePolicy` is not set in this arm. Arm B requires the images to be on the
+`instanceStorePolicy` is not set in this variant. The snapshot variant requires the images to be on the
 volume restored from the snapshot. Setting `instanceStorePolicy` (step 3) moves
 container storage to local NVMe, and the restored volume is then unused. The snapshot
 would still be built and maintained, without affecting the pull.
 
-この arm では `instanceStorePolicy` を設定しません。arm B はスナップショットから復元した
+この variant では `instanceStorePolicy` を設定しません。snapshot はスナップショットから復元した
 ボリューム上にイメージがあることを前提としています。`instanceStorePolicy`（ステップ 3）を
 設定するとコンテナストレージはローカル NVMe に移り、復元したボリュームは使われません。
 スナップショットの作成と維持は続きますが、pull には影響しなくなります。
@@ -122,8 +122,8 @@ would still be built and maintained, without affecting the pull.
 
 ```bash
 bin/prep.sh                       # reads the snapshot ID
-bin/show_config.sh arm-b-snapshot # shows the one-line difference
-bin/bench.sh arm-b-snapshot
+bin/show_config.sh snapshot # shows the one-line difference
+bin/bench.sh snapshot
 ```
 
 The breakdown should contain no image pull stage.
@@ -135,7 +135,7 @@ The breakdown should contain no image pull stage.
 ## Verify / 検証
 
 ```bash
-bin/verify_config.sh arm-b-snapshot
+bin/verify_config.sh snapshot
 ```
 
 Two checks / 確認は 2 つ:
@@ -168,9 +168,9 @@ Two checks / 確認は 2 つ:
 
 | Symptom | Cause |
 |---|---|
-| Pod stays Pending; the node class is missing<br>Pod が Pending のまま、node class が無い | `results/snapshot-id.txt` does not exist, so `prep.sh` skipped arm B<br>`results/snapshot-id.txt` が無く、`prep.sh` が arm B を飛ばした |
+| Pod stays Pending; the node class is missing<br>Pod が Pending のまま、node class が無い | `results/snapshot-id.txt` does not exist, so `prep.sh` skipped the snapshot variant<br>`results/snapshot-id.txt` が無く、`prep.sh` が snapshot を飛ばした |
 | The node fails to launch<br>ノードが起動しない | `volumeSize` is smaller than the snapshot<br>`volumeSize` がスナップショットより小さい |
-| The image is pulled anyway<br>結果的に pull される | The snapshot was taken from an NVMe arm, so it is empty; or it contains a different image than the one being tested<br>NVMe の arm から取得したため空、またはテスト対象と別のイメージが入っている |
+| The image is pulled anyway<br>結果的に pull される | The snapshot was taken from an NVMe variant, so it is empty; or it contains a different image than the one being tested<br>NVMe の variant から取得したため空、またはテスト対象と別のイメージが入っている |
 
 ---
 

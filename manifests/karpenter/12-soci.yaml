@@ -1,7 +1,7 @@
 ################################################################################
-# Arm C -- local NVMe + SOCI snapshotter in parallel pull/unpack mode
+# soci -- local NVMe + SOCI snapshotter in parallel pull/unpack mode
 #
-# Two changes from arm A, and they work together:
+# Two changes from the baseline. They work together:
 #
 #   instanceStorePolicy: RAID0
 #     Karpenter builds a RAID0 array from the instance's NVMe disks and moves
@@ -25,7 +25,7 @@
 apiVersion: karpenter.k8s.aws/v1
 kind: EC2NodeClass
 metadata:
-  name: arm-c-soci
+  name: soci
 spec:
   amiSelectorTerms:
     - alias: bottlerocket@latest
@@ -38,7 +38,7 @@ spec:
         volumeType: gp3
         encrypted: true
         deleteOnTermination: true
-    # Still provisioned like arm A. With RAID0 in play containerd is on NVMe, so
+    # Still provisioned like the baseline. With RAID0 set, containerd is on NVMe, so
     # this volume is mostly idle -- keeping it identical removes it as a variable.
     - deviceName: /dev/xvdb
       ebs:
@@ -55,7 +55,7 @@ spec:
     - tags:
         karpenter.sh/discovery: "@CLUSTER_NAME@"
   tags:
-    workshop-arm: arm-c-soci
+    workshop-variant: soci
   userData: |
     [settings.container-runtime]
     snapshotter = "soci"
@@ -72,7 +72,7 @@ spec:
 apiVersion: karpenter.sh/v1
 kind: NodePool
 metadata:
-  name: arm-c-soci
+  name: soci
 spec:
   disruption:
     consolidationPolicy: WhenEmpty
@@ -82,12 +82,12 @@ spec:
   template:
     metadata:
       labels:
-        workshop-arm: arm-c-soci
+        workshop-variant: soci
     spec:
       nodeClassRef:
         group: karpenter.k8s.aws
         kind: EC2NodeClass
-        name: arm-c-soci
+        name: soci
       taints:
         - key: nvidia.com/gpu
           effect: NoSchedule

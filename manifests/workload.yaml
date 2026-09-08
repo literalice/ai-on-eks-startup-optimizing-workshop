@@ -4,7 +4,7 @@
 # One bare Pod, not a Deployment -- creationTimestamp is then exactly the moment
 # the scheduler first sees demand, with no ReplicaSet indirection in between.
 #
-# The identical pod spec runs on all four arms. Only @ARM_NAME@ changes, which
+# The identical pod spec runs on all four variants. Only @ARM_NAME@ changes, which
 # picks the NodePool. Whatever difference the table shows is the node, not the
 # workload.
 #
@@ -19,7 +19,7 @@
 #
 # @POD_NAME@, @ARM_NAME@ and @IMAGE@ are substituted by bin/bench.sh. @POD_NAME@ is
 # separate from @ARM_NAME@ so a warm re-run gets its own pod name while still
-# selecting the same arm's node.
+# selecting the same variant's node.
 ################################################################################
 apiVersion: v1
 kind: Pod
@@ -28,12 +28,12 @@ metadata:
   namespace: bench
   labels:
     app: bench
-    workshop-arm: "@ARM_NAME@"
+    workshop-variant: "@ARM_NAME@"
 spec:
   restartPolicy: Never
   terminationGracePeriodSeconds: 0
   nodeSelector:
-    workshop-arm: "@ARM_NAME@"
+    workshop-variant: "@ARM_NAME@"
   tolerations:
     - key: nvidia.com/gpu
       operator: Exists

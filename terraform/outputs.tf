@@ -4,12 +4,12 @@ output "region" {
 }
 
 output "karpenter_cluster_name" {
-  description = "Cluster carrying arms A, B and C."
+  description = "Cluster carrying the baseline, snapshot and soci variants."
   value       = module.eks_karpenter.cluster_name
 }
 
 output "automode_cluster_name" {
-  description = "Cluster carrying arm D."
+  description = "Cluster carrying the automode variant."
   value       = module.eks_automode.cluster_name
 }
 

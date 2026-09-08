@@ -130,26 +130,26 @@ def already_present(offset):
 
 ARMS = {}
 
-# ---------------------------------------------------------------- cold arms
-ARMS["arm-a-baseline"] = dict(
+# ---------------------------------------------------------------- cold variants
+ARMS["baseline"] = dict(
     offsets=dict(created=0, nc_created=2, launched=5, registered=45, initialized=50,
                  scheduled=52, container_started=418, ready=425),
     events=[event("Pulling", f'Pulling image "{WORKLOAD}"', 55), pulled("6m0.2s", 415, "6m3.1s")],
     node=node(),
 )
-ARMS["arm-b-snapshot"] = dict(
+ARMS["snapshot"] = dict(
     offsets=dict(created=0, nc_created=2, launched=5, registered=48, initialized=53,
                  scheduled=55, container_started=58, ready=64),
     events=[already_present(56)],
     node=node(),
 )
-ARMS["arm-c-soci"] = dict(
+ARMS["soci"] = dict(
     offsets=dict(created=0, nc_created=2, launched=5, registered=44, initialized=49,
                  scheduled=51, container_started=207, ready=214),
     events=[event("Pulling", f'Pulling image "{WORKLOAD}"', 54), pulled("2m30.0s", 204, "2m32.4s")],
     node=node(),
 )
-ARMS["arm-d-automode"] = dict(
+ARMS["automode"] = dict(
     offsets=dict(created=0, nc_created=3, launched=7, registered=58, initialized=64,
                  scheduled=66, container_started=232, ready=240),
     events=[event("Pulling", f'Pulling image "{WORKLOAD}"', 69), pulled("2m39.0s", 228, "2m40.1s")],
@@ -158,7 +158,7 @@ ARMS["arm-d-automode"] = dict(
 
 # ------------------------------------------------------------------ warm run
 # NodeClaim created long before the pod, which is what makes this warm.
-ARMS["arm-c-soci-warm"] = dict(
+ARMS["soci-warm"] = dict(
     offsets=dict(created=1000, nc_created=0, launched=3, registered=43, initialized=48,
                  scheduled=1002, container_started=1004, ready=1010),
     events=[already_present(1003)],
@@ -216,7 +216,7 @@ def main() -> int:
             nodeclaims(spec["offsets"], pool=name), indent=2))
         (d / "events.json").write_text(json.dumps({"items": spec["events"]}, indent=2))
         (d / "node.json").write_text(json.dumps(spec["node"], indent=2))
-        (d / "arm.txt").write_text(name + "\n")
+        (d / "variant.txt").write_text(name + "\n")
         (d / "instance-type.txt").write_text("g6.4xlarge\n")
         (d / "image.txt").write_text(WORKLOAD + "\n")
         if spec.get("ttft"):

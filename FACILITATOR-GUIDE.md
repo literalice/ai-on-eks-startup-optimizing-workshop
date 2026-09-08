@@ -24,12 +24,12 @@ prerequisites.
 | # | Task / 作業 | Time | If not done / 未実施の場合 |
 |---|---|---|---|
 | 1 | `terraform apply` to build both clusters<br>クラスター 2 面を作成 | 25–30 min | 30 minutes is spent on the day<br>当日に 30 分かかる |
-| 2 | `bin/bench.sh arm-a-baseline`, then `snapshot/snapshot-from-node.sh`<br>arm A 実行後にスナップショット作成 | 10 min | arm B cannot be run<br>arm B が実行できない |
+| 2 | `bin/bench.sh baseline`, then `snapshot/snapshot-from-node.sh`<br>baseline 実行後にスナップショット作成 | 10 min | the snapshot variant cannot be run<br>snapshot が実行できない |
 | 3 | `snapshot/stage-model.sh` to upload the weights<br>ウェイトを S3 にアップロード | 5–10 min | phase 2 cannot be run<br>フェーズ 2 が実行できない |
-| 4 | `bin/prep.sh` to apply the arms<br>arm を適用 | 2 min | nothing can be run<br>何も実行できない |
-| 5 | Run all four arms, the warm run, and all three phase-2 variants once<br>4 arm、warm 実行、フェーズ 2 の 3 通りを 1 回ずつ実行 | 40–50 min | the first execution happens during the session<br>初回実行が本番になる |
+| 4 | `bin/prep.sh` to apply the variants<br>variant を適用 | 2 min | nothing can be run<br>何も実行できない |
+| 5 | Run all four variants, the warm run, and all three phase-2 variants once<br>4 variant、warm 実行、フェーズ 2 の 3 通りを 1 回ずつ実行 | 40–50 min | the first execution happens during the session<br>初回実行が本番になる |
 | 6 | `bin/check_runai.sh`<br>Run:ai の対応確認 | 3 min | the two Run:ai variants may fail during the session<br>Run:ai 系 2 本が本番で失敗しうる |
-| 7 | Check GPU quota `L-DB2E81BA` is at least 64 vCPU | 5 min | arms wait for capacity instead of starting<br>arm が起動せず待ちになる |
+| 7 | Check GPU quota `L-DB2E81BA` is at least 64 vCPU | 5 min | variants wait for capacity instead of starting<br>variant が起動せず待ちになる |
 | 8 | Check the vLLM DLC tag still exists<br>vLLM DLC のタグ存在確認 | 2 min | `ImagePullBackOff`<br>同 |
 
 Keep the results from step 5. If a live run fails, the previous day's figures can be
@@ -52,17 +52,17 @@ Sixty minutes.
 | Time | Content | Live? |
 |---|---|---|
 | 0:00–0:05 | Purpose and scope. State that custom AMI builds are out of scope.<br>目的とスコープ。カスタム AMI は対象外と伝える | slides |
-| 0:05–0:15 | Step 1: the baseline. Run arm A.<br>ステップ 1: ベースライン。arm A を実行 | live |
+| 0:05–0:15 | Step 1: the baseline. Run the baseline variant.<br>ステップ 1: ベースライン。baseline を実行 | live |
 | 0:15–0:27 | Steps 2 and 3: the two image mechanisms.<br>ステップ 2 と 3: イメージ配送の 2 方式 | live |
 | 0:27–0:34 | Step 4: Auto Mode. Show the configuration diff, then the figures.<br>ステップ 4: Auto Mode。設定差分を見せてから数字 | diff and prior figures |
 | 0:34–0:39 | Step 5: warm scale-out.<br>ステップ 5: warm スケールアウト | live (1s) |
 | 0:39–0:50 | Step 6: weights, three variants, TTFT.<br>ステップ 6: ウェイト 3 通りと TTFT | prior figures |
 | 0:50–1:00 | Section 5: what to adopt. Discussion.<br>セクション 5: 何を採用するか。議論 | discussion |
 
-Arm A's run takes one to two minutes. During that time `bench.sh` prints each step's
+The baseline run takes one to two minutes. During that time `bench.sh` prints each step's
 figure as it completes:
 
-arm A の実行には 1〜2 分かかります。その間、`bench.sh` は各段階の数字を完了時に出力します。
+baseline の実行には 1〜2 分かかります。その間、`bench.sh` は各段階の数字を完了時に出力します。
 
 ```
   node Ready                                  29s          9s
@@ -87,8 +87,8 @@ While waiting, show the configuration diffs. Keep these open in advance:
 待っている間に設定差分を表示してください。事前に開いておきます。
 
 ```bash
-bin/show_config.sh arm-c-soci        # against the baseline
-bin/show_config.sh arm-d-automode    # against arm C
+bin/show_config.sh soci        # against the baseline
+bin/show_config.sh automode    # against the SOCI variant
 ```
 
 ---
@@ -97,21 +97,21 @@ bin/show_config.sh arm-d-automode    # against arm C
 
 ### Step 1 — the baseline
 
-Start `bin/bench.sh arm-a-baseline`, then describe what it is measuring.
+Start `bin/bench.sh baseline`, then describe what it is measuring.
 
 > This is Bottlerocket with its default settings. The figures from this run are what the
-> later arms are compared against.
+> later variants are compared against.
 >
-> Bottlerocket を既定設定で動かしています。この実行の数字が、以降の arm の比較対象に
+> Bottlerocket を既定設定で動かしています。この実行の数字が、以降の variant の比較対象に
 > なります。
 
 When it finishes:
 
 > Provisioning took about thirty seconds. The image pull took ninety-six. So the
-> difference between the arms is going to come from how the image reaches the node, not
+> difference between the variants is going to come from how the image reaches the node, not
 > from how the node is provisioned.
 >
-> プロビジョニングは約 30 秒、イメージ pull は 96 秒でした。したがって arm 間の差は、
+> プロビジョニングは約 30 秒、イメージ pull は 96 秒でした。したがって variant 間の差は、
 > ノードの作り方ではなくイメージの届き方から生じます。
 
 Cover how the breakdown is produced, because it determines whether the figures are worth
@@ -151,14 +151,14 @@ State that the two cannot be combined before showing either set of figures.
 > 方法は 2 つあり、同じノードには併用できません。どちらも Bottlerocket がコンテナ
 > イメージに使うボリュームを対象にしているため、一方を設定するともう一方は使われません。
 
-Show arm B's configuration before running it. It is one field, which is worth displaying
+Show the snapshot configuration before running it. It is one field, which is worth displaying
 rather than describing:
 
-arm B は実行前に設定を表示してください。1 フィールドなので、口頭で説明するより表示する
+snapshot は実行前に設定を表示してください。1 フィールドなので、口頭で説明するより表示する
 方が早いです。
 
 ```bash
-bin/show_config.sh arm-b-snapshot
+bin/show_config.sh snapshot
 ```
 
 After the run:
@@ -179,9 +179,9 @@ Then state the cost, before it is asked about:
 > このスナップショットの作成には数分かかり、イメージが変わるたびに作り直しが必要です。
 > セクション 5 で改善幅と比較する数字はこれです。
 
-For arm C, show the configuration and note that Bottlerocket takes TOML settings:
+For the SOCI variant, show the configuration and note that Bottlerocket takes TOML settings:
 
-arm C では設定を表示し、Bottlerocket が TOML 設定を取ることに触れてください。
+soci では設定を表示し、Bottlerocket が TOML 設定を取ることに触れてください。
 
 > Two additions. A policy line, and Bottlerocket settings in TOML. Bottlerocket's
 > userData is settings, not a shell script, which differs from Amazon Linux.
@@ -189,10 +189,10 @@ arm C では設定を表示し、Bottlerocket が TOML 設定を取ることに�
 > 追加は 2 箇所です。ポリシー 1 行と、TOML の Bottlerocket 設定です。Bottlerocket の
 > userData はシェルスクリプトではなく設定であり、この点は Amazon Linux と異なります。
 
-> Arm A and arm C differ by one mechanism, with the same provisioner, OS and instance
+> The baseline and SOCI variants differ by one mechanism, with the same provisioner, OS and instance
 > type. That makes the difference between them attributable to that mechanism.
 >
-> arm A と arm C は、プロビジョナ・OS・インスタンスタイプが同じで、異なるのは 1 つの方式
+> baseline と soci は、プロビジョナ・OS・インスタンスタイプが同じで、異なるのは 1 つの方式
 > だけです。このため両者の差はその方式に帰属できます。
 
 ### Step 4 — Auto Mode
@@ -202,7 +202,7 @@ Show the configuration diff before the figures.
 数字より先に設定差分を表示してください。
 
 ```bash
-bin/show_config.sh arm-d-automode
+bin/show_config.sh automode
 ```
 
 > `instanceStorePolicy` is absent. The six lines of Bottlerocket settings are absent. The
@@ -229,42 +229,42 @@ State the cluster difference:
 
 クラスターが異なる点も伝えてください。
 
-> Arm D runs on a separate cluster, because self-managed Karpenter and Auto Mode both own
+> The Auto Mode variant runs on a separate cluster, because self-managed Karpenter and Auto Mode both own
 > the same CRDs. The VPC, subnets and instance type are the same, so the pull path is the
-> same, but the control plane is not. And the timing difference between arm C and arm D
+> same, but the control plane is not. And the timing difference between the SOCI and Auto Mode variants
 > is within the run-to-run variation — the reference results have two runs where the
 > ordering between them is different. The difference in configuration is consistent; the
 > difference in timing is not.
 >
-> arm D は別のクラスターで動きます。self-managed Karpenter と Auto Mode が同じ CRD を
+> automode は別のクラスターで動きます。self-managed Karpenter と Auto Mode が同じ CRD を
 > 所有するためです。VPC・サブネット・インスタンスタイプは同じで pull 経路も同じですが、
-> コントロールプレーンは異なります。また arm C と arm D の時間差は実行ごとのばらつきの
+> コントロールプレーンは異なります。また soci と automode の時間差は実行ごとのばらつきの
 > 範囲内です。参考計測には両者の順序が異なる 2 回分が入っています。設定量の差は一定ですが、
 > 時間の差は一定ではありません。
 
 ### Step 5 — warm scale-out
 
-Run this immediately after arm C, while that node is still present. It takes about a
+Run this immediately after soci, while that node is still present. It takes about a
 second.
 
-arm C の直後、そのノードが残っている間に実行してください。1 秒程度で終わります。
+soci の直後、そのノードが残っている間に実行してください。1 秒程度で終わります。
 
 > Everything so far measured the first pod on a new node. When a deployment scales out,
-> some pods are scheduled onto nodes that are already running. This is the same arm with
+> some pods are scheduled onto nodes that are already running. This is the same variant with
 > the node kept.
 >
 > ここまではすべて、新しいノードでの 1 個目の Pod を計測しています。Deployment が
 > スケールアウトすると、一部の Pod はすでに動いているノードにスケジュールされます。これは
-> 同じ arm を、ノードを残して実行したものです。
+> 同じ variant を、ノードを残して実行したものです。
 
 > Ninety-six of the ninety-seven seconds was incurred once per node, not once per pod.
-> Two things follow. First, arm B's improvement applies to the first pod on a node and
+> Two things follow. First, the snapshot variant's improvement applies to the first pod on a node and
 > not to this one. Second, if most of your pods land on nodes that are already running,
 > the three mechanisms we just measured affect a small part of your total startup time,
 > and node capacity policy affects more of it.
 >
 > 97 秒のうち 96 秒が、Pod ごとではなくノード 1 台につき 1 回発生する分でした。ここから
-> 2 点が言えます。1 つ目、arm B の改善はノードの 1 個目の Pod に効き、この Pod には効きません。
+> 2 点が言えます。1 つ目、snapshot の改善はノードの 1 個目の Pod に効き、この Pod には効きません。
 > 2 つ目、Pod の大半がすでに動いているノードに乗る場合、いま計測した 3 方式が影響するのは
 > 起動時間全体の一部で、ノードのキャパシティ方針の方が影響が大きくなります。
 
@@ -366,10 +366,10 @@ Display the decision table and leave time for discussion.
 > 持ち帰るのはリポジトリと計測方法です。判断に使う数字は、自分のアカウントで出る数字です。
 
 > Two measurements determine most of the choice: how often your images change, which is
-> what decides between arms B and C; and how much of your startup time is incurred once
+> what decides between the snapshot and SOCI variants; and how much of your startup time is incurred once
 > per node, which decides whether any of these mechanisms affects most of it.
 >
-> 選択の大半は 2 つの計測で決まります。イメージの更新頻度（arm B と C のどちらを選ぶかを
+> 選択の大半は 2 つの計測で決まります。イメージの更新頻度（snapshot と soci のどちらを選ぶかを
 > 決める）と、起動時間のうちノード 1 回あたりに発生する分（これらの方式が全体の大部分に
 > 影響するかを決める）です。
 
@@ -381,8 +381,8 @@ Display the decision table and leave time for discussion.
 |---|---|---|
 | The node does not launch<br>ノードが起動しない | GPU quota or capacity<br>クォータか在庫 | Use `results-dryrun-*` with `bin/report.py` and say the figures are from the previous day<br>`results-dryrun-*` を `bin/report.py` で表示し、前日の数字と伝える |
 | `ImagePullBackOff` | The DLC tag has changed<br>DLC のタグが変わった | Update `WORKLOAD_IMAGE` in `config.env`. Task 8 prevents this.<br>`config.env` の `WORKLOAD_IMAGE` を更新。作業 8 で防げる |
-| Arm C's figures match arm A's<br>arm C が arm A と同じ | Bottlerocket earlier than 1.44.0, so the SOCI setting is ignored<br>Bottlerocket が 1.44.0 より前で SOCI 設定が無視された | `prep.sh` checks this beforehand. If it occurs, the version dependency can be shown as part of the session.<br>`prep.sh` が事前に確認。発生した場合はバージョン依存の例として扱える |
-| Arm B's pod stays Pending<br>arm B の Pod が Pending | No snapshot, so the node class was not applied<br>スナップショットが無く node class が未適用 | Check `results/snapshot-id.txt`. Use the previous day's figures for arm B.<br>`results/snapshot-id.txt` を確認。arm B は前日の数字で |
+| soci's figures match the baseline's<br>soci が baseline と同じ | Bottlerocket earlier than 1.44.0, so the SOCI setting is ignored<br>Bottlerocket が 1.44.0 より前で SOCI 設定が無視された | `prep.sh` checks this beforehand. If it occurs, the version dependency can be shown as part of the session.<br>`prep.sh` が事前に確認。発生した場合はバージョン依存の例として扱える |
+| snapshot's pod stays Pending<br>snapshot の Pod が Pending | No snapshot, so the node class was not applied<br>スナップショットが無く node class が未適用 | Check `results/snapshot-id.txt`. Use the previous day's figures for it.<br>`results/snapshot-id.txt` を確認。snapshot は前日の数字で |
 | The pod never becomes Ready and `nvidia-smi` fails<br>Ready にならず `nvidia-smi` が失敗 | Kubernetes earlier than 1.34 with a CUDA 13 image<br>Kubernetes が 1.34 未満で CUDA 13 イメージ | Check this before the day.<br>前日に確認 |
 | The Run:ai variants fail to start<br>Run:ai 系が起動しない | `runai-streamer` missing, S3 permissions, or region unset<br>`runai-streamer` 不在、S3 権限、region 未設定 | Show `runai-local` only; the loader comparison still works.<br>`runai-local` のみ表示。ローダー比較は成立する |
 | The TTFT probe fails<br>TTFT プローブが失敗 | The ConfigMap was not created<br>ConfigMap が未作成 | `bin/prep.sh` creates it. Use the Ready figures.<br>`bin/prep.sh` が作成。Ready までの数字で進める |
@@ -396,18 +396,18 @@ Display the decision table and leave time for discussion.
   release and raise the roadmap question separately.
   カスタム AMI ビルドは対象外です。聞かれた場合は、上流のリリースを待ち、ロードマップの
   質問は別途扱う、が回答になります。
-- Arm D runs on a different control plane, and its timing difference from arm C is within
+- The automode variant runs on a different control plane, and its timing difference from soci is within
   the run-to-run variation. Present it as what Auto Mode provides without configuration,
   not as a faster result.
-  arm D はコントロールプレーンが異なり、arm C との時間差は実行ごとのばらつきの範囲内です。
+  automode はコントロールプレーンが異なり、soci との時間差は実行ごとのばらつきの範囲内です。
   速いという結果ではなく、Auto Mode が設定なしで提供する内容として提示してください。
 - The SOCI settings are the values AWS publishes as a starting point. They are not fitted
   to any particular layer profile.
   SOCI の設定値は AWS が出発点として公開しているものです。特定のレイヤ構成に合わせた値では
   ありません。
-- Each arm was measured once. Differences below about 10% need a repeat run before being
+- Each variant was measured once. Differences below about 10% need a repeat run before being
   relied on.
-  各 arm は 1 回の計測です。10% 程度未満の差は、再実行で確認してから判断してください。
+  各 variant は 1 回の計測です。10% 程度未満の差は、再実行で確認してから判断してください。
 - If you cite Run:ai's published benchmark figures for scale, state the source and the
   model size, and keep them separate from the figures measured here.
   規模感のために Run:ai の公開ベンチマーク値を引用する場合は、出典とモデルサイズを述べ、
@@ -428,7 +428,7 @@ Display the decision table and leave time for discussion.
 1. Two terminals: one for `bench.sh`, one running
    `watch kubectl get pod,nodeclaim -A`
    ターミナル 2 枚（`bench.sh` 用と `watch` 用）
-2. `bin/show_config.sh arm-c-soci` and `bin/show_config.sh arm-d-automode`
+2. `bin/show_config.sh soci` and `bin/show_config.sh automode`
 3. `results-dryrun-*/report.md`, in case a live run fails
    本番の実行が失敗した場合用
 4. The section 5 decision table from the README

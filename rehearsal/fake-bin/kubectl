@@ -54,11 +54,11 @@ def arm_from(text):
         return None
     candidates = sorted((p.name for p in FIXTURES.iterdir() if p.is_dir()), key=len, reverse=True)
     cleaned = text.replace("bench-", "").replace("karpenter.sh/nodepool=", "")
-    cleaned = cleaned.replace("workshop-arm=", "")
+    cleaned = cleaned.replace("workshop-variant=", "")
     for name in candidates:
         if name == cleaned or name in text:
             return name
-    # bench.sh labels phase-2 pods with the arm C nodepool
+    # bench.sh labels phase-2 pods with the variant C nodepool
     for name in candidates:
         if cleaned and cleaned in name:
             return name
@@ -71,21 +71,21 @@ def clock():
     return json.loads(STATE.read_text())
 
 
-def set_clock(arm):
-    STATE.write_text(json.dumps({"arm": arm, "start": time.time()}))
+def set_clock(variant):
+    STATE.write_text(json.dumps({"variant": variant, "start": time.time()}))
 
 
-def sim_now(arm):
+def sim_now(variant):
     """The simulated clock, started by `apply` and never reset by a read.
 
     Reads must not touch it. Within one run, different queries resolve to
     different fixture names -- a phase-2 pod is `weights-runai-s3` while its
-    NodeClaim selector is the arm C pool -- so a read that restarted the clock
+    NodeClaim selector is the soci pool -- so a read that restarted the clock
     would keep pushing the finish line away and the run would never complete.
     """
     state = clock()
     if not state:
-        set_clock(arm)
+        set_clock(variant)
         state = clock()
     real_start = datetime.fromtimestamp(state["start"], tz=timezone.utc)
     return real_start, (time.time() - state["start"]) * SPEED
@@ -95,19 +95,19 @@ def parse(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def load(arm, filename):
-    path = FIXTURES / arm / filename
+def load(variant, filename):
+    path = FIXTURES / variant / filename
     return json.loads(path.read_text()) if path.is_file() else {}
 
 
-def base_offset(arm):
+def base_offset(variant):
     """Fixture offsets are absolute from BASE; normalise so the pod starts at 0."""
-    pod = load(arm, "pod.json")
+    pod = load(variant, "pod.json")
     created = (pod.get("metadata") or {}).get("creationTimestamp")
     return (parse(created) - BASE).total_seconds() if created else 0.0
 
 
-def rewrite(obj, arm, real_start, elapsed, zero):
+def rewrite(obj, variant, real_start, elapsed, zero):
     """Rebase timestamps and drop list entries that have not happened yet.
 
     Timestamps are rebased 1:1 -- the offsets the tools see are the fixture's real
@@ -172,9 +172,9 @@ NODES_WIDE_AUTOMODE = """NAME                  STATUS   ROLES    AGE   VERSION  
 i-0a41c9e2b7d3f5602   Ready    <none>   38m   v1.34.1-eks-1a2b3c4   10.0.1.44     Bottlerocket OS 1.64.0 (aws-k8s-1.34)   containerd://2.1.4"""
 
 NODEPOOLS = """NAME             NODECLASS        NODES   READY   AGE
-arm-a-baseline   arm-a-baseline   0       True    39m
-arm-b-snapshot   arm-b-snapshot   0       True    39m
-arm-c-soci       arm-c-soci       0       True    39m"""
+baseline   baseline   0       True    39m
+snapshot   snapshot   0       True    39m
+soci       soci       0       True    39m"""
 
 
 def main():
@@ -187,16 +187,16 @@ def main():
                 for line in text.splitlines():
                     if line.strip().startswith("name:"):
                         podname = line.split(":", 1)[1].strip().strip('"')
-                        arm = arm_from(podname)
-                        if arm:
-                            set_clock(arm)
+                        variant = arm_from(podname)
+                        if variant:
+                            set_clock(variant)
                         break
         return 0
 
     if "exec" in args:
         pods = positional_after("exec") or []
-        arm = arm_from(pods[0] if pods else None)
-        ttft = load(arm, "ttft.json") if arm else {}
+        variant = arm_from(pods[0] if pods else None)
+        ttft = load(variant, "ttft.json") if variant else {}
         print(json.dumps(ttft) if ttft else json.dumps({"error": "no fixture"}))
         return 0 if ttft else 1
 
@@ -218,47 +218,47 @@ def main():
         return 0
 
     field_selector = arg_after("--field-selector")
-    current = (clock() or {}).get("arm")
+    current = (clock() or {}).get("variant")
     from_args = arm_from(name or selector) or arm_from(field_selector)
 
     # The in-flight run wins for anything that carries timestamps.
     #
     # Within one phase-2 run the pod resolves to `weights-runai-s3` while its
-    # NodeClaim selector is the arm C pool, and those two fixtures have unrelated
+    # NodeClaim selector is the soci pool, and those two fixtures have unrelated
     # time bases. Serving each from its own fixture normalises them differently and
     # the stage chain comes out interleaved and nonsensical. One run is in flight at
     # a time, so read everything from it.
-    arm = current or from_args
+    variant = current or from_args
 
     # Except the pre-run existence checks, which are asking about a *pool* before
     # the next run has started. Those must answer from the selector.
     if kind == "nodeclaims" and ("--no-headers" in args or ("-o" in args and args[args.index("-o") + 1] == "name")):
-        arm = from_args or current
+        variant = from_args or current
 
-    if not arm:
+    if not variant:
         print("{}" if wants_json else "", end="\n" if not wants_json else "")
         return 0
 
-    real_start, elapsed = sim_now(arm)
-    zero = base_offset(arm)
+    real_start, elapsed = sim_now(variant)
+    zero = base_offset(variant)
 
     if kind == "pod":
-        print(json.dumps(rewrite(load(arm, "pod.json"), arm, real_start, elapsed, zero)))
+        print(json.dumps(rewrite(load(variant, "pod.json"), variant, real_start, elapsed, zero)))
     elif kind == "nodeclaims":
-        obj = load(arm, "nodeclaims.json")
+        obj = load(variant, "nodeclaims.json")
         if "-o" in args and args[args.index("-o") + 1] == "name":
             # reset.sh asks for names; report none so it does not try to delete.
             return 0
         if "--no-headers" in args:
-            # Warm check counts lines. A warm arm already has its node.
-            if "warm" in arm or "weights" in arm:
+            # Warm check counts lines. A warm variant already has its node.
+            if "warm" in variant or "weights" in variant:
                 print("nc-1   g6.4xlarge   us-west-2a   ip-10-0-1-5   True   12m")
             return 0
-        print(json.dumps(rewrite(obj, arm, real_start, elapsed, zero)))
+        print(json.dumps(rewrite(obj, variant, real_start, elapsed, zero)))
     elif kind == "events":
-        print(json.dumps(rewrite(load(arm, "events.json"), arm, real_start, elapsed, zero)))
+        print(json.dumps(rewrite(load(variant, "events.json"), variant, real_start, elapsed, zero)))
     elif kind == "node":
-        print(json.dumps(load(arm, "node.json")))
+        print(json.dumps(load(variant, "node.json")))
     else:
         print("{}" if wants_json else "")
     return 0

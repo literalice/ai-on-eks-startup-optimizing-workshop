@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Fail if the Bottlerocket AMI is older than the minimum SOCI version.
 
-Arm C's whole configuration is a no-op on Bottlerocket < 1.44.0: the snapshotter
-setting is ignored and the arm quietly measures the same thing as arm A. That
-failure mode reads as "SOCI does not help", which is the wrong conclusion to take
-out of a workshop, so assert it up front.
+The soci variant's configuration has no effect on Bottlerocket < 1.44.0: the
+snapshotter setting is ignored and the variant measures the same thing as the
+baseline. The resulting figures would suggest SOCI has no effect, so the version is
+checked here.
 
 AMI names look like: bottlerocket-aws-k8s-1.34-nvidia-x86_64-v1.64.0-7f9a1b2c
 """
@@ -32,7 +32,7 @@ def main() -> int:
     if got is None:
         print(
             f"    WARNING: could not read a version out of {ami_name!r}. "
-            f"Confirm it is >= {minimum} before trusting arm C.",
+            f"Confirm it is >= {minimum} before relying on the soci variant.",
             file=sys.stderr,
         )
         return 0
@@ -40,8 +40,8 @@ def main() -> int:
     if got < want:
         print(
             f"    ERROR: Bottlerocket {'.'.join(map(str, got))} is older than {minimum}. "
-            "SOCI parallel pull/unpack is unavailable, so arm C would silently "
-            "measure the same thing as arm A.",
+            "SOCI parallel pull/unpack is unavailable, so the soci variant would "
+            "measure the same thing as the baseline variant.",
             file=sys.stderr,
         )
         return 1

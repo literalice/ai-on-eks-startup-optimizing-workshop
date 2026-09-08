@@ -1,7 +1,7 @@
 ################################################################################
 # Phase 2 -- section 4: how the model weights reach GPU memory.
 #
-# One pod spec, three load paths, selected by bench.sh. All three run on the arm C
+# One pod spec, three load paths, selected by bench.sh. All three run on the soci
 # node class with the same model, so the only variable is the loader.
 #
 #   s3-initcontainer  init container copies S3 -> local disk with s5cmd, then
@@ -37,7 +37,7 @@ metadata:
   namespace: bench
   labels:
     app: bench
-    workshop-arm: arm-c-soci
+    workshop-variant: soci
     phase: weights
     variant: "@VARIANT@"
 spec:
@@ -50,7 +50,7 @@ spec:
   # the service account is also what this workshop recommends for production.
   serviceAccountName: bench
   nodeSelector:
-    workshop-arm: arm-c-soci
+    workshop-variant: soci
   tolerations:
     - key: nvidia.com/gpu
       operator: Exists

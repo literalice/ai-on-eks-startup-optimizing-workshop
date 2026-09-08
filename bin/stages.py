@@ -7,7 +7,7 @@ breakdown that section 1 asks for: where the time actually goes.
 The method is deliberately dumb. Collect every timestamp Kubernetes already
 records, sort them, and report the gap between each consecutive pair. The stages
 therefore sum to the total exactly -- there is no residual bucket and no time
-quietly unaccounted for, which is what makes the comparison between arms
+quietly unaccounted for, which is what makes the comparison between variants
 defensible rather than suggestive.
 
 Timestamps come from:
@@ -74,7 +74,7 @@ SEGMENT_LABELS = {
     ("init_finished", "container_started"): "container start",
     ("pull_end", "container_started"): "container start",
     ("container_started", "pod_ready"): "workload becomes Ready",
-    # Arm B: no pull events at all, because the layers arrived on the snapshot.
+    # The snapshot variant: no pull events at all, because the layers arrived on the snapshot.
     ("pod_scheduled", "container_started"): "container start (image already on node)",
     # Warm run: the node already existed, so the pod is scheduled straight away and
     # there are no provisioning anchors in front of it.
@@ -158,10 +158,10 @@ def condition_true_time(obj, cond_type):
 def node_facts(node):
     """What the node actually turned out to be.
 
-    The comparison between arms rests on them being the same hardware in the same
+    The comparison between variants rests on them being the same hardware in the same
     place. Reading it back off the node turns that from an assertion into a check.
     osImage also states the Bottlerocket version and variant, which is the other
-    thing arm C silently depends on.
+    thing variant C silently depends on.
     """
     labels = (node.get("metadata") or {}).get("labels") or {}
     info = (node.get("status") or {}).get("nodeInfo") or {}
@@ -263,7 +263,7 @@ def analyse_pull(events, workload_image):
 
         elif reason == "Pulled" and mentions_workload(message):
             if "already present on machine" in message:
-                # Arm B: the snapshot put the layers on the data volume, so
+                # The snapshot variant: the snapshot put the layers on the data volume, so
                 # containerd never contacts the registry.
                 result["image_already_present"] = True
                 continue
@@ -381,7 +381,7 @@ def main() -> int:
     events = load(raw / "events.json")
     node = load(raw / "node.json")
 
-    arm = read_line(raw / "arm.txt", raw.name)
+    variant = read_line(raw / "variant.txt", raw.name)
     instance_type = read_line(raw / "instance-type.txt")
     workload_image = read_line(raw / "image.txt")
 
@@ -423,7 +423,7 @@ def main() -> int:
     facts = node_facts(node)
 
     record = {
-        "arm": arm,
+        "variant": variant,
         "instance_type_requested": instance_type,
         "image": workload_image,
         "node": node_name,
@@ -457,7 +457,7 @@ def main() -> int:
 
     # ------------------------------------------------------------------ print
     print()
-    print(f"  arm            {arm}")
+    print(f"  variant            {variant}")
     print(f"  instance       {facts['instance_type'] or instance_type}"
           f"{'  ' + facts['zone'] if facts['zone'] else ''}"
           f"{'  ' + facts['capacity_type'] if facts['capacity_type'] else ''}")

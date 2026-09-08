@@ -7,7 +7,7 @@
 # the narration is text, the measurements are not.
 #
 #   bin/demo.sh            run the whole thing
-#   bin/demo.sh --quick    skip the cold baseline (arm A), for a shorter recording
+#   bin/demo.sh --quick    skip the cold baseline (variant A), for a shorter recording
 #
 # Prerequisites, all done before recording (see README):
 #   terraform apply, snapshot/build-snapshot.sh, snapshot/stage-model.sh, bin/prep.sh
@@ -85,7 +85,7 @@ say "The problem we are here to solve: GPU inference pods take too long to becom
 
 say "One point at the start. The image and instance type here are ours, so the absolute figures will differ from yours. What can be compared is which stage accounts for most of the time, and how each mechanism changes it. Your own figures come from running these steps in your account."
 
-say "Four arms. Same pod spec, same instance type, same VPC and subnets, same container image. The only thing that differs between them is how the container image reaches the node."
+say "Four variants. Same pod spec, same instance type, same VPC and subnets, same container image. The only thing that differs between them is how the container image reaches the node."
 
 cat <<'ARMS'
     A  baseline    Bottlerocket as shipped -- EBS data volume, sequential pull
@@ -95,15 +95,15 @@ cat <<'ARMS'
 ARMS
 sleep "${BEAT}"
 
-say "Two constraints before any figures appear. Arms B and C cannot both be applied to the same node, because both govern the volume Bottlerocket uses for container images. And arm B's mechanism is not available on Auto Mode, because its NodeClass has no snapshotID field."
+say "Two constraints before any figures appear. The snapshot and SOCI variants cannot both be applied to the same node, because both govern the volume Bottlerocket uses for container images. And the snapshot mechanism is not available on Auto Mode, because its NodeClass has no snapshotID field."
 
-note "Every run below starts cold: the arm's node is deleted first, so nothing is cached."
+note "Every run below starts cold: the variant's node is deleted first, so nothing is cached."
 note "Stages are computed from timestamps Kubernetes already records, so they sum to the total exactly. No time is unattributed."
 
 ################################################################################
 title "The environment"
 
-say "Two clusters, one shared VPC. Self-managed Karpenter carries arms A, B and C; EKS Auto Mode carries arm D. Two clusters rather than one because both Karpenters own the same CRDs."
+say "Two clusters, one shared VPC. Self-managed Karpenter carries variants A, B and C; EKS Auto Mode carries variant D. Two clusters rather than one because both Karpenters own the same CRDs."
 
 run kubectl --context "${KARPENTER_CLUSTER}" get nodes -o wide
 run kubectl --context "${AUTOMODE_CLUSTER}" get nodes -o wide
@@ -116,21 +116,21 @@ run kubectl --context "${KARPENTER_CLUSTER}" get nodepools
 if [[ "${QUICK}" == false ]]; then
   title "Step 1 -- where the time goes"
 
-  say "Arm A first: Bottlerocket exactly as it ships. This is the number everything else is measured against. Watch the step timings appear as each step completes."
+  say "The baseline variant first: Bottlerocket exactly as it ships. This is the number everything else is measured against. Watch the step timings appear as each step completes."
 
   say "The provisioning steps will print quickly. The output then stops after the image pull starts, and resumes when the pull finishes. That interval is what this workshop measures."
 
-  say "The configuration first. This is the baseline, so nothing is configured. The node class is still worth reading, because the later arms modify it."
+  say "The configuration first. This is the baseline, so nothing is configured. The node class is still worth reading, because the later variants modify it."
 
-  run "${HERE}/show_config.sh" arm-a-baseline
+  run "${HERE}/show_config.sh" baseline
 
-  run "${HERE}/bench.sh" arm-a-baseline
+  run "${HERE}/bench.sh" baseline
 
-  say "Now the check that this was a clean baseline: no userData, no instanceStorePolicy, no snapshotID, and container storage on EBS rather than NVMe. With those confirmed, an improvement in a later arm can be attributed to what that arm added."
+  say "Now the check that this was a clean baseline: no userData, no instanceStorePolicy, no snapshotID, and container storage on EBS rather than NVMe. With those confirmed, an improvement in a later variant can be attributed to what that variant added."
 
-  run "${HERE}/verify_config.sh" arm-a-baseline
+  run "${HERE}/verify_config.sh" baseline
 
-  say "The node was ready in about half a minute. The image pull took roughly three times as long as all the other stages combined. So the difference between the arms will come from how the image reaches the node, rather than from how the node is provisioned."
+  say "The node was ready in about half a minute. The image pull took roughly three times as long as all the other stages combined. So the difference between the variants will come from how the image reaches the node, rather than from how the node is provisioned."
 
   note "Compare the effective throughput line with the instance's network bandwidth of up to 25 Gbps. The pull was not limited by the network."
 fi
@@ -138,63 +138,63 @@ fi
 ################################################################################
 title "Step 2 and 3 -- two image mechanisms that cannot be combined"
 
-say "Arm B: the image layers were baked into an EBS snapshot ahead of time, and the node restores its data volume from that snapshot. There is nothing to pull, because the layers are already on the disk when the node boots."
+say "The snapshot variant: the image layers were baked into an EBS snapshot ahead of time, and the node restores its data volume from that snapshot. There is nothing to pull, because the layers are already on the disk when the node boots."
 
-say "Here is the entire configuration change for arm B. One field."
+say "Here is the entire configuration change for variant B. One field."
 
-run "${HERE}/show_config.sh" arm-b-snapshot
+run "${HERE}/show_config.sh" snapshot
 
-run "${HERE}/bench.sh" arm-b-snapshot
+run "${HERE}/bench.sh" snapshot
 
 say "There is no pull stage. kubelet reports the image as already present on the machine, so the registry was not contacted."
 
 say "The next check does not use the timing figures. It reads the volume the node booted with and compares its snapshot ID with the one we built, then confirms kubelet reported the image as already present."
 
-run "${HERE}/verify_config.sh" arm-b-snapshot
+run "${HERE}/verify_config.sh" snapshot
 
 say "Building that snapshot took three to five minutes, and it has to be rebuilt whenever the image changes. That is the figure to weigh against this improvement in the last section."
 
-say "Arm C now: instead of pre-baking, we move container storage onto the instance's local NVMe and switch the snapshotter to SOCI in parallel pull/unpack mode. SOCI opens several connections per layer and unpacks several layers at once. The image is completely unmodified -- no index to build, no change to your build pipeline."
+say "The SOCI variant now: instead of pre-baking, we move container storage onto the instance's local NVMe and switch the snapshotter to SOCI in parallel pull/unpack mode. SOCI opens several connections per layer and unpacks several layers at once. The image is completely unmodified -- no index to build, no change to your build pipeline."
 
-say "Arm C is two changes, and this is the whole of it -- a policy line, and Bottlerocket settings in TOML. Note that Bottlerocket takes settings, not a shell script; that is the most common thing to get wrong coming from Amazon Linux."
+say "The SOCI variant is two changes, and this is the whole of it -- a policy line, and Bottlerocket settings in TOML. Note that Bottlerocket takes settings, not a shell script; that is the most common thing to get wrong coming from Amazon Linux."
 
-run "${HERE}/show_config.sh" arm-c-soci
+run "${HERE}/show_config.sh" soci
 
-run "${HERE}/bench.sh" arm-c-soci
+run "${HERE}/bench.sh" soci
 
-say "The proof for arm C. Container storage moved to NVMe -- visible in the node's ephemeral-storage capacity, which now reflects the instance store rather than the EBS volume. And the settings reached the node. Note what this does not prove: that SOCI ran. Bottlerocket has no shell to check from, so the behavioural evidence is the throughput figure."
+say "The proof for variant C. Container storage moved to NVMe -- visible in the node's ephemeral-storage capacity, which now reflects the instance store rather than the EBS volume. And the settings reached the node. Note what this does not prove: that SOCI ran. Bottlerocket has no shell to check from, so the behavioural evidence is the throughput figure."
 
-run "${HERE}/verify_config.sh" arm-c-soci
+run "${HERE}/verify_config.sh" soci
 
-say "Arms A and C differ by one mechanism, with the same provisioner, operating system and instance type. That makes the difference between them attributable to that mechanism."
+say "The baseline and SOCI variants differ by one mechanism, with the same provisioner, operating system and instance type. That makes the difference between them attributable to that mechanism."
 
-note "Compare the throughput figures for arms A and C. The difference is the effect of parallel pull and unpack."
+note "Compare the throughput figures for variants A and C. The difference is the effect of parallel pull and unpack."
 
 ################################################################################
 title "Step 4 -- what Auto Mode does without being configured"
 
-say "Before the numbers, look at the configuration. This is arm C's node class against arm D's. Count what is present on the left and absent on the right."
+say "Before the numbers, look at the configuration. This is the SOCI node class against variant D's. Count what is present on the left and absent on the right."
 
-run "${HERE}/show_config.sh" arm-d-automode
+run "${HERE}/show_config.sh" automode
 
-say "The instanceStorePolicy is gone. The six lines of Bottlerocket settings are gone. The block device mappings are gone. And yet on a GPU instance with local NVMe, Auto Mode formats the NVMe, puts container storage on it, and pulls and unpacks in parallel. That is arm C's configuration, done by the service."
+say "The instanceStorePolicy is gone. The six lines of Bottlerocket settings are gone. The block device mappings are gone. And yet on a GPU instance with local NVMe, Auto Mode formats the NVMe, puts container storage on it, and pulls and unpacks in parallel. That is the SOCI variant's configuration, done by the service."
 
-run "${HERE}/bench.sh" arm-d-automode
+run "${HERE}/bench.sh" automode
 
 say "And the proof that we did not quietly configure it after all: no userData, no instanceStorePolicy, no block device mappings -- yet the node still reports the NVMe."
 
-run "${HERE}/verify_config.sh" arm-d-automode
+run "${HERE}/verify_config.sh" automode
 
-say "Two things Auto Mode cannot do, and both belong on the record. There is no snapshotID on its NodeClass, so arm B's mechanism is unavailable -- if pre-baked images are the right answer for a workload, that workload does not go on Auto Mode. And the SOCI tuning knobs from arm C are not exposed; you get the service defaults."
+say "Two things Auto Mode cannot do, and both belong on the record. There is no snapshotID on its NodeClass, so the snapshot mechanism is unavailable -- if pre-baked images are the right answer for a workload, that workload does not go on Auto Mode. And the SOCI tuning knobs from variant C are not exposed; you get the service defaults."
 
 ################################################################################
 title "Step 5 -- cold first pod versus warm scale-out"
 
-say "Everything so far measured the first pod onto a brand new node. Most scale-out events do not look like that. They land on a node that is already running, with the image already in its cache. Same arm, node kept this time."
+say "Everything so far measured the first pod onto a brand new node. Most scale-out events do not look like that. They land on a node that is already running, with the image already in its cache. Same variant, node kept this time."
 
-run "${HERE}/bench.sh" arm-c-soci --warm
+run "${HERE}/bench.sh" soci --warm
 
-say "Almost all of the cold measurement was incurred once per node rather than once per pod. This matters for reading arm B: a snapshot affects the first pod on a node and does not affect this one."
+say "Almost all of the cold measurement was incurred once per node rather than once per pod. This matters for reading variant B: a snapshot affects the first pod on a node and does not affect this one."
 
 say "If most of your pods are scheduled onto nodes that are already running, the three mechanisms we just measured affect a small part of your total startup time. Node capacity policy would affect more of it: keeping nodes for longer, or provisioning them before they are needed."
 
@@ -241,11 +241,11 @@ say "These runs also measure time to first token. A pod reaching Ready means vLL
 ################################################################################
 title "The readout"
 
-say "All arms together. Provisioning, image, and workload, plus effective throughput and time to first token where we measured it."
+say "All variants together. Provisioning, image, and workload, plus effective throughput and time to first token where we measured it."
 
 run "${HERE}/report.py" "${RESULTS_DIR}"
 
-say "What this does not tell you, stated plainly. One run per arm, so treat anything under about ten percent as noise until it repeats. Arm B's snapshot build time is not in the table, and that is the cost that decides whether it is worth adopting. And arm D ran on a different control plane, so read it as indicative rather than like-for-like."
+say "What this does not tell you, stated plainly. One run per variant, so treat anything under about ten percent as noise until it repeats. The snapshot build time is not in the table, and that is the cost that decides whether it is worth adopting. And variant D ran on a different control plane, so read it as indicative rather than like-for-like."
 
 ################################################################################
 title "Section 5 -- what to adopt"
@@ -259,7 +259,7 @@ cat <<'DECISION'
 DECISION
 sleep "${BEAT}"
 
-say "Two measurements determine most of this choice. How often your images change, which decides between arms B and C. And how much of your startup time is incurred once per node, which decides whether any of these mechanisms affects most of it."
+say "Two measurements determine most of this choice. How often your images change, which decides between the snapshot and SOCI variants. And how much of your startup time is incurred once per node, which decides whether any of these mechanisms affects most of it."
 
 say "Each configuration shown here is written up in the steps directory: the YAML, which field goes in which resource, the reason for it, what happens if it is missing, and how to check it took effect. Those are the documents to follow in your own account."
 

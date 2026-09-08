@@ -12,7 +12,7 @@ without being configured, and which options are not available in exchange.
 ## The configuration / 設定内容
 
 This is the complete node class, from
-[`13-arm-d-automode.yaml`](../manifests/automode/13-arm-d-automode.yaml):
+[`13-automode.yaml`](../manifests/automode/13-automode.yaml):
 
 これが node class の全体です。
 
@@ -20,7 +20,7 @@ This is the complete node class, from
 apiVersion: eks.amazonaws.com/v1        # not karpenter.k8s.aws/v1
 kind: NodeClass                         # not EC2NodeClass
 metadata:
-  name: arm-d-automode
+  name: automode
 spec:
   role: "<Auto Mode node IAM role>"
   ephemeralStorage:
@@ -101,8 +101,8 @@ uses two clusters rather than running both on one.
 
 ```bash
 bin/prep.sh
-bin/show_config.sh arm-d-automode   # diffs against step 3
-bin/bench.sh arm-d-automode
+bin/show_config.sh automode   # diffs against step 3
+bin/bench.sh automode
 ```
 
 ---
@@ -110,7 +110,7 @@ bin/bench.sh arm-d-automode
 ## Verify / 検証
 
 ```bash
-bin/verify_config.sh arm-d-automode
+bin/verify_config.sh automode
 ```
 
 This confirms that `userData`, `instanceStorePolicy` and `blockDeviceMappings` are
@@ -126,23 +126,23 @@ NVMe の設定がサービス側で行われたことが分かります。
 
 ## What the figures show / 数字から分かること
 
-- In the reference run this arm reached 164 MB/s, compared with 151 MB/s for step 3,
+- In the reference run this variant reached 164 MB/s, compared with 151 MB/s for step 3,
   with 11 fewer lines of configuration.
-  参考計測ではこの arm は 164 MB/s で、ステップ 3 は 151 MB/s でした。設定は 11 行少ない
+  参考計測ではこの variant は 164 MB/s で、ステップ 3 は 151 MB/s でした。設定は 11 行少ない
   状態です。
-- The difference between arm C and arm D is within the run-to-run variation. The
-  reference results include two runs of phase 1: arm C and arm D were both 89 seconds
+- The difference between the SOCI and Auto Mode variants is within the run-to-run variation. The
+  reference results include two runs of phase 1: the SOCI and Auto Mode variants were both 89 seconds
   in the first run, and 97 and 94 seconds in the second. The ordering between them is
   not consistent, so the timing figures do not show one to be faster than the other.
   The difference in the amount of configuration is consistent.
-  arm C と arm D の差は実行ごとのばらつきの範囲内です。参考計測にはフェーズ 1 の 2 回分が
-  含まれており、1 回目は arm C と D がともに 89 秒、2 回目は 97 秒と 94 秒でした。両者の
+  soci と automode の差は実行ごとのばらつきの範囲内です。参考計測にはフェーズ 1 の 2 回分が
+  含まれており、1 回目は soci と automode がともに 89 秒、2 回目は 97 秒と 94 秒でした。両者の
   順序は一定でないため、時間の数字からどちらが速いとは言えません。設定量の差は一定です。
-- This arm runs on a different control plane. The VPC, subnets and instance type are the
-  same, so the image pull path is the same, but the comparison with arms A to C is not
+- This variant runs on a different control plane. The VPC, subnets and instance type are the
+  same, so the image pull path is the same, but the comparison with the other three is not
   a direct one.
-  この arm はコントロールプレーンが異なります。VPC、サブネット、インスタンスタイプは同じで
-  イメージ pull の経路も同じですが、arm A〜C との比較は直接的なものではありません。
+  この variant はコントロールプレーンが異なります。VPC、サブネット、インスタンスタイプは同じで
+  イメージ pull の経路も同じですが、他の 3 つとの比較は直接的なものではありません。
 
 ---
 

@@ -24,7 +24,7 @@ variable "kubernetes_version" {
 }
 
 variable "vpc_cidr" {
-  description = "CIDR for the shared VPC. Both clusters live here so that every arm pulls over an identical network path."
+  description = "CIDR for the shared VPC. Both clusters live here so that every variant pulls over an identical network path."
   type        = string
   default     = "10.0.0.0/16"
 }

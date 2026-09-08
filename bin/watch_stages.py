@@ -190,7 +190,7 @@ def main() -> int:
         if previous_time is None:
             previous_time = base
 
-        # Notes first, so that on a fast arm the "nothing to pull" line does not
+        # Notes first, so that on a fast variant the "nothing to pull" line does not
         # land underneath the total it explains.
         if extra["image_already_present"] and "already_present" not in reported_flags:
             print("  image already on node, nothing to pull")

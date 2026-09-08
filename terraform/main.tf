@@ -3,12 +3,12 @@
 #
 # One shared VPC, two clusters:
 #
-#   <prefix>-karpenter  self-managed Karpenter. Carries arms A (baseline),
+#   <prefix>-karpenter  self-managed Karpenter. Carries the baseline,
 #                       B (EBS snapshot data volume) and C (local NVMe + SOCI).
-#                       Each arm is an EC2NodeClass, so all three differ only in
+#                       Each variant is an EC2NodeClass, so all three differ only in
 #                       the image mechanism.
 #
-#   <prefix>-automode   EKS Auto Mode. Carries arm D. Auto Mode configures NVMe
+#   <prefix>-automode   EKS Auto Mode. Carries automode. Auto Mode configures NVMe
 #                       and parallel image pull on GPU instances without being
 #                       configured to.
 #
@@ -84,7 +84,7 @@ module "vpc" {
 }
 
 ################################################################################
-# Cluster 1 -- self-managed Karpenter (arms A, B, C)
+# Cluster 1 -- self-managed Karpenter (baseline, snapshot, soci)
 ################################################################################
 
 module "eks_karpenter" {
@@ -112,7 +112,7 @@ module "eks_karpenter" {
   subnet_ids = module.vpc.private_subnets
 
   # Small on-demand group for CoreDNS and the Karpenter controller only. No
-  # workload lands here -- every arm is taint-free but pinned by nodeSelector.
+  # workload lands here -- every variant is taint-free but pinned by nodeSelector.
   eks_managed_node_groups = {
     system = {
       ami_type       = "BOTTLEROCKET_x86_64"
@@ -305,9 +305,9 @@ resource "helm_release" "karpenter" {
 }
 
 ################################################################################
-# Cluster 2 -- EKS Auto Mode (arm D)
+# Cluster 2 -- EKS Auto Mode (automode)
 #
-# node_pools includes "system" so CoreDNS has somewhere to land. The GPU arm
+# node_pools includes "system" so CoreDNS has somewhere to land. The GPU variant
 # uses a custom NodeClass applied from manifests/, which needs the node IAM role
 # of the built-in "default" NodeClass -- bin/prep.sh reads it off the cluster
 # rather than plumbing it through Terraform.

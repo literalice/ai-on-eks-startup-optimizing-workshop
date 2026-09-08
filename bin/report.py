@@ -5,7 +5,7 @@ Prints a stage table and stacked bars to the terminal for the live session, and
 writes results/report.md so the numbers leave the room in a form that can be
 pasted into a document.
 
-If an arm was run more than once the latest run wins, and the earlier ones are
+If an variant was run more than once the latest run wins, and the earlier ones are
 listed underneath so a re-run that contradicts the first is visible rather than
 silently overwritten.
 
@@ -19,36 +19,36 @@ import json
 import pathlib
 import sys
 
-ARM_ORDER = [
-    "arm-a-baseline",
-    "arm-b-snapshot",
-    "arm-c-soci",
-    "arm-d-automode",
-    "arm-a-baseline-warm",
-    "arm-b-snapshot-warm",
-    "arm-c-soci-warm",
-    "arm-d-automode-warm",
+VARIANT_ORDER = [
+    "baseline",
+    "snapshot",
+    "soci",
+    "automode",
+    "baseline-warm",
+    "snapshot-warm",
+    "soci-warm",
+    "automode-warm",
     "weights-s3-initcontainer",
     "weights-runai-local",
     "weights-runai-s3",
 ]
 
-ARM_DESCRIPTIONS = {
-    "arm-a-baseline": "Bottlerocket as shipped, EBS data volume, sequential pull",
-    "arm-b-snapshot": "images pre-baked into the data volume from an EBS snapshot",
-    "arm-c-soci": "local NVMe + SOCI parallel pull/unpack, configured by hand",
-    "arm-d-automode": "EKS Auto Mode, nothing configured",
-    "arm-a-baseline-warm": "second pod onto the warm baseline node",
-    "arm-b-snapshot-warm": "second pod onto the warm snapshot node",
-    "arm-c-soci-warm": "second pod onto the warm SOCI node",
-    "arm-d-automode-warm": "second pod onto the warm Auto Mode node",
+VARIANT_DESCRIPTIONS = {
+    "baseline": "Bottlerocket as shipped, EBS data volume, sequential pull",
+    "snapshot": "images pre-baked into the data volume from an EBS snapshot",
+    "soci": "local NVMe + SOCI parallel pull/unpack, configured by hand",
+    "automode": "EKS Auto Mode, nothing configured",
+    "baseline-warm": "second pod onto the warm baseline node",
+    "snapshot-warm": "second pod onto the warm snapshot node",
+    "soci-warm": "second pod onto the warm SOCI node",
+    "automode-warm": "second pod onto the warm Auto Mode node",
     "weights-s3-initcontainer": "weights copied S3 to disk, vLLM default safetensors loader",
     "weights-runai-local": "weights copied S3 to disk, Run:ai Model Streamer from disk",
     "weights-runai-s3": "no copy: Run:ai Model Streamer reads S3 directly",
 }
 
-COLD_ARMS = ["arm-a-baseline", "arm-b-snapshot", "arm-c-soci", "arm-d-automode"]
-WEIGHTS_ARMS = ["weights-s3-initcontainer", "weights-runai-local", "weights-runai-s3"]
+COLD_VARIANTS = ["baseline", "snapshot", "soci", "automode"]
+WEIGHTS_VARIANTS = ["weights-s3-initcontainer", "weights-runai-local", "weights-runai-s3"]
 
 # Stages collapsed into the three things a reader actually decides about.
 PROVISION_SEGMENTS = {
@@ -86,11 +86,11 @@ def load_results(results_dir: pathlib.Path):
         except json.JSONDecodeError:
             print(f"  skipping unreadable {path.name}", file=sys.stderr)
             continue
-        arm = record.get("arm", path.stem)
+        variant = record.get("variant", path.stem)
         record["_file"] = path.name
-        if arm in runs:
-            extras.setdefault(arm, []).append(runs[arm])
-        runs[arm] = record
+        if variant in runs:
+            extras.setdefault(variant, []).append(runs[variant])
+        runs[variant] = record
     return runs, extras
 
 
@@ -112,18 +112,18 @@ def bucket(record):
 
 
 def bars(runs, order, width=48):
-    """Stacked bars, scaled to the slowest arm."""
+    """Stacked bars, scaled to the slowest variant."""
     totals = [r["total_seconds"] for r in (runs[a] for a in order) if r.get("total_seconds")]
     if not totals:
         return []
     peak = max(totals)
     label_width = max(len(a) for a in order)
     lines = []
-    for arm in order:
-        record = runs[arm]
+    for variant in order:
+        record = runs[variant]
         total = record.get("total_seconds")
         if not total:
-            lines.append(f"  {arm:<{label_width}}  (never reached Ready)")
+            lines.append(f"  {variant:<{label_width}}  (never reached Ready)")
             continue
         provision, image, workload = bucket(record)
         scale = width / peak
@@ -133,7 +133,7 @@ def bars(runs, order, width=48):
             (".", workload),   # workload
         ]
         bar = "".join(char * max(0, round(seconds * scale)) for char, seconds in segments)
-        lines.append(f"  {arm:<{label_width}} |{bar:<{width}}| {total:>7.1f}s")
+        lines.append(f"  {variant:<{label_width}} |{bar:<{width}}| {total:>7.1f}s")
     return lines
 
 
@@ -141,8 +141,8 @@ def markdown(runs, order, extras):
     out = []
     out.append("# Bottlerocket startup-time workshop -- measured results")
     out.append("")
-    out.append("Every arm ran cold: no node existed for that arm when the pod was submitted.")
-    out.append("All arms are pinned to the same instance type, in the same VPC and subnets.")
+    out.append("Every variant ran cold: no node existed for that variant when the pod was submitted.")
+    out.append("All variants are pinned to the same instance type, in the same VPC and subnets.")
     out.append("")
 
     images = {runs[a].get("image") for a in order if runs[a].get("image")}
@@ -155,10 +155,10 @@ def markdown(runs, order, extras):
 
     out.append("## Summary")
     out.append("")
-    out.append("| Arm | What it is | Provisioning | Image | Workload | Start to Ready | Image throughput |")
+    out.append("| Variant | What it is | Provisioning | Image | Workload | Start to Ready | Image throughput |")
     out.append("|---|---|---:|---:|---:|---:|---:|")
-    for arm in order:
-        record = runs[arm]
+    for variant in order:
+        record = runs[variant]
         provision, image, workload = bucket(record)
         total = record.get("total_seconds")
         total_text = f"**{total:.0f}s**" if total else "did not become Ready"
@@ -166,7 +166,7 @@ def markdown(runs, order, extras):
         throughput = record.get("effective_throughput_mb_s")
         throughput_text = f"{throughput:.0f} MB/s" if throughput else "—"
         out.append(
-            f"| `{arm}` | {ARM_DESCRIPTIONS.get(arm, '')} | {provision:.0f}s | "
+            f"| `{variant}` | {VARIANT_DESCRIPTIONS.get(variant, '')} | {provision:.0f}s | "
             f"{image:.0f}s{note} | {workload:.0f}s | {total_text} | {throughput_text} |"
         )
     out.append("")
@@ -181,16 +181,16 @@ def markdown(runs, order, extras):
     out.append("## What actually launched")
     out.append("")
     out.append(
-        "The comparison only means something if the arms ran on the same hardware in "
+        "The comparison only means something if the variants ran on the same hardware in "
         "the same place. This is read back off the nodes rather than assumed."
     )
     out.append("")
-    out.append("| Arm | Instance | Zone | Capacity | Node OS | Runtime |")
+    out.append("| Variant | Instance | Zone | Capacity | Node OS | Runtime |")
     out.append("|---|---|---|---|---|---|")
-    for arm in order:
-        facts = runs[arm].get("node_facts") or {}
+    for variant in order:
+        facts = runs[variant].get("node_facts") or {}
         out.append(
-            f"| `{arm}` | {facts.get('instance_type') or '—'} | {facts.get('zone') or '—'} | "
+            f"| `{variant}` | {facts.get('instance_type') or '—'} | {facts.get('zone') or '—'} | "
             f"{facts.get('capacity_type') or '—'} | {facts.get('os_image') or '—'} | "
             f"{facts.get('container_runtime') or '—'} |"
         )
@@ -203,7 +203,7 @@ def markdown(runs, order, extras):
     }
     if len(launched_types) > 1:
         out.append(
-            f"> **The arms did not all get the same instance type** "
+            f"> **The variants did not all get the same instance type** "
             f"({', '.join(sorted(launched_types))}). Treat the comparison as invalid "
             f"until they are re-run on one type."
         )
@@ -216,14 +216,14 @@ def markdown(runs, order, extras):
     }
     if len(launched_zones) > 1:
         out.append(
-            f"> Arms landed in more than one Availability Zone "
+            f"> Variants landed in more than one Availability Zone "
             f"({', '.join(sorted(launched_zones))}). Same-region pull paths, so the "
             f"effect should be small, but it is a difference the table does not control for."
         )
         out.append("")
 
     # ------------------------------------------------------- warm scale-out
-    warm_pairs = [(a, f"{a}-warm") for a in COLD_ARMS if f"{a}-warm" in runs and a in runs]
+    warm_pairs = [(a, f"{a}-warm") for a in COLD_VARIANTS if f"{a}-warm" in runs and a in runs]
     if warm_pairs:
         out.append("## Cold first pod vs warm scale-out")
         out.append("")
@@ -234,7 +234,7 @@ def markdown(runs, order, extras):
             "them is how much of your startup cost is a once-per-node cost."
         )
         out.append("")
-        out.append("| Arm | Cold first pod | Warm second pod | Once-per-node cost |")
+        out.append("| Variant | Cold first pod | Warm second pod | Once-per-node cost |")
         out.append("|---|---:|---:|---:|")
         for cold, warm in warm_pairs:
             cold_total = runs[cold].get("total_seconds")
@@ -255,7 +255,7 @@ def markdown(runs, order, extras):
         out.append("")
 
     # --------------------------------------------- weights: how they load
-    weights_present = [a for a in WEIGHTS_ARMS if a in runs]
+    weights_present = [a for a in WEIGHTS_VARIANTS if a in runs]
     if weights_present:
         out.append("## Phase 2 -- how the weights reach GPU memory")
         out.append("")
@@ -269,13 +269,13 @@ def markdown(runs, order, extras):
             "| Variant | What it does | Start to Ready | TTFT after Ready | Submit to first token |"
         )
         out.append("|---|---|---:|---:|---:|")
-        for arm in weights_present:
-            record = runs[arm]
+        for variant in weights_present:
+            record = runs[variant]
             total = record.get("total_seconds")
             ttft = record.get("ttft_seconds")
             end_to_end = record.get("submit_to_first_token_seconds")
             out.append(
-                f"| `{arm.replace('weights-', '')}` | {ARM_DESCRIPTIONS.get(arm, '')} | "
+                f"| `{variant.replace('weights-', '')}` | {VARIANT_DESCRIPTIONS.get(variant, '')} | "
                 f"{f'{total:.0f}s' if total else '—'} | "
                 f"{f'{ttft:.2f}s' if ttft else '—'} | "
                 f"{f'**{end_to_end:.0f}s**' if end_to_end else '—'} |"
@@ -303,29 +303,29 @@ def markdown(runs, order, extras):
         )
         out.append("")
 
-    baseline = runs.get("arm-a-baseline", {}).get("total_seconds")
+    baseline = runs.get("baseline", {}).get("total_seconds")
     if baseline:
         out.append("## Against the cold baseline")
         out.append("")
-        out.append("| Arm | Start to Ready | vs baseline |")
+        out.append("| Variant | Start to Ready | vs baseline |")
         out.append("|---|---:|---:|")
-        for arm in order:
-            total = runs[arm].get("total_seconds")
+        for variant in order:
+            total = runs[variant].get("total_seconds")
             if not total:
                 continue
             delta = total - baseline
             pct = (delta / baseline) * 100
             sign = "+" if delta > 0 else ""
-            out.append(f"| `{arm}` | {total:.0f}s | {sign}{delta:.0f}s ({sign}{pct:.0f}%) |")
+            out.append(f"| `{variant}` | {total:.0f}s | {sign}{delta:.0f}s ({sign}{pct:.0f}%) |")
         out.append("")
 
     out.append("## Full stage breakdown")
     out.append("")
-    for arm in order:
-        record = runs[arm]
-        out.append(f"### `{arm}`")
+    for variant in order:
+        record = runs[variant]
+        out.append(f"### `{variant}`")
         out.append("")
-        out.append(f"{ARM_DESCRIPTIONS.get(arm, '')}")
+        out.append(f"{VARIANT_DESCRIPTIONS.get(variant, '')}")
         out.append("")
         if record.get("image_already_present"):
             out.append("Image was already on the node at first use, so there is no pull stage.")
@@ -350,15 +350,15 @@ def markdown(runs, order, extras):
     if extras:
         out.append("## Superseded runs")
         out.append("")
-        out.append("Earlier runs of the same arm, kept so a re-run that disagrees is visible.")
+        out.append("Earlier runs of the same variant, kept so a re-run that disagrees is visible.")
         out.append("")
-        out.append("| Arm | File | Start to Ready |")
+        out.append("| Variant | File | Start to Ready |")
         out.append("|---|---|---:|")
-        for arm, records in extras.items():
+        for variant, records in extras.items():
             for record in records:
                 total = record.get("total_seconds")
                 out.append(
-                    f"| `{arm}` | `{record['_file']}` | "
+                    f"| `{variant}` | `{record['_file']}` | "
                     f"{f'{total:.0f}s' if total else 'did not become Ready'} |"
                 )
         out.append("")
@@ -366,16 +366,16 @@ def markdown(runs, order, extras):
     out.append("## What this does not tell you")
     out.append("")
     out.append(
-        "- One run per arm. Pull times vary with registry and network conditions, "
+        "- One run per variant. Pull times vary with registry and network conditions, "
         "so treat a difference under roughly 10% as noise until it is repeated."
     )
     out.append(
-        "- Arm B's snapshot has to be rebuilt whenever the image changes. The "
+        "- Variant B's snapshot has to be rebuilt whenever the image changes. The "
         "build time is not in this table, and it is the cost that decides whether "
         "the mechanism is worth adopting."
     )
     out.append(
-        "- Arm D ran on a different cluster from arms A to C, because Auto Mode and "
+        "- Variant D ran on a different cluster from variants A to C, because Auto Mode and "
         "self-managed Karpenter cannot share the karpenter.sh CRDs. Same VPC, "
         "subnets and instance type, so the pull path is identical, but it is not "
         "the same control plane."
@@ -394,10 +394,10 @@ def main() -> int:
 
     runs, extras = load_results(results_dir)
     if not runs:
-        print("no results yet -- run bin/bench.sh <arm> first", file=sys.stderr)
+        print("no results yet -- run bin/bench.sh <variant> first", file=sys.stderr)
         return 1
 
-    order = [a for a in ARM_ORDER if a in runs] + [a for a in runs if a not in ARM_ORDER]
+    order = [a for a in VARIANT_ORDER if a in runs] + [a for a in runs if a not in VARIANT_ORDER]
 
     print()
     print("  provisioning: #   image: =   workload: .")
@@ -408,14 +408,14 @@ def main() -> int:
 
     width = max(len(a) for a in order)
     print(
-        f"  {'arm':<{width}} {'provision':>10} {'image':>8} {'workload':>9} "
+        f"  {'variant':<{width}} {'provision':>10} {'image':>8} {'workload':>9} "
         f"{'total':>8} {'MB/s':>7} {'TTFT':>7}"
     )
     print(
         f"  {'-' * width} {'-' * 10} {'-' * 8} {'-' * 9} {'-' * 8} {'-' * 7} {'-' * 7}"
     )
-    for arm in order:
-        record = runs[arm]
+    for variant in order:
+        record = runs[variant]
         provision, image, workload = bucket(record)
         total = record.get("total_seconds")
         total_text = f"{total:.0f}s" if total else "n/a"
@@ -424,13 +424,13 @@ def main() -> int:
         ttft = record.get("ttft_seconds")
         ttft_text = f"{ttft:.2f}s" if ttft else "-"
         print(
-            f"  {arm:<{width}} {provision:>9.0f}s {image:>7.0f}s {workload:>8.0f}s "
+            f"  {variant:<{width}} {provision:>9.0f}s {image:>7.0f}s {workload:>8.0f}s "
             f"{total_text:>8} {throughput_text:>7} {ttft_text:>7}"
         )
     print()
 
     # Warm vs cold, on screen -- the pair a reader is most likely to want.
-    for cold in COLD_ARMS:
+    for cold in COLD_VARIANTS:
         warm = f"{cold}-warm"
         if cold in runs and warm in runs:
             cold_total = runs[cold].get("total_seconds")
@@ -440,17 +440,17 @@ def main() -> int:
                     f"  {cold}: cold {cold_total:.0f}s -> warm {warm_total:.0f}s "
                     f"(once-per-node cost {cold_total - warm_total:.0f}s)"
                 )
-    if any(f"{c}-warm" in runs for c in COLD_ARMS):
+    if any(f"{c}-warm" in runs for c in COLD_VARIANTS):
         print()
 
     # Flag an unfair comparison on screen, not only in the file.
     launched = {
-        arm: (runs[arm].get("node_facts") or {}).get("instance_type")
-        for arm in order
+        variant: (runs[variant].get("node_facts") or {}).get("instance_type")
+        for variant in order
     }
     distinct = {v for v in launched.values() if v}
     if len(distinct) > 1:
-        print(f"  !! arms ran on different instance types: {', '.join(sorted(distinct))}")
+        print(f"  !! variants ran on different instance types: {', '.join(sorted(distinct))}")
         print("     the comparison is not valid until they are re-run on one type")
         print()
 

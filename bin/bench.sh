@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# Run one arm and collect everything needed to break the wait into stages.
+# Run one variant and collect everything needed to break the wait into stages.
 #
 # Phase 1 -- how the image reaches the node:
-#   bin/bench.sh arm-a-baseline
-#   bin/bench.sh arm-b-snapshot
-#   bin/bench.sh arm-c-soci
-#   bin/bench.sh arm-d-automode
+#   bin/bench.sh baseline
+#   bin/bench.sh snapshot
+#   bin/bench.sh soci
+#   bin/bench.sh automode
 #
-# Warm scale-out -- the same arm again onto the node that is already running, so
+# Warm scale-out -- the same variant again onto the node that is already running, so
 # the image is in the node's cache. This is what most scale-out events actually
 # hit; the cold runs above are the first pod only.
-#   bin/bench.sh arm-c-soci --warm
+#   bin/bench.sh soci --warm
 #
 # Phase 2 -- how the weights reach GPU memory (section 4). Adds a
 # time-to-first-token measurement, because Ready is not the same as useful:
@@ -40,7 +40,7 @@ MODE="${2:-}"
 
 usage() {
   echo "usage:" >&2
-  echo "  bench.sh <arm-a-baseline|arm-b-snapshot|arm-c-soci|arm-d-automode> [--warm]" >&2
+  echo "  bench.sh <baseline|snapshot|soci|automode> [--warm]" >&2
   echo "  bench.sh weights <s3-initcontainer|runai-local|runai-s3>" >&2
   exit 2
 }
@@ -58,14 +58,14 @@ case "${TARGET}" in
       *) usage ;;
     esac
     CONTEXT="${KARPENTER_CLUSTER}"
-    NODEPOOL="arm-c-soci"
+    NODEPOOL="soci"
     POD="bench-weights-${VARIANT}"
     RUN_NAME="weights-${VARIANT}"
     ;;
-  arm-d-automode|arm-a-baseline|arm-b-snapshot|arm-c-soci)
+  automode|baseline|snapshot|soci)
     [[ -n "${MODE}" && "${MODE}" != "--warm" ]] && usage
     [[ "${MODE}" == "--warm" ]] && WARM=true
-    if [[ "${TARGET}" == "arm-d-automode" ]]; then
+    if [[ "${TARGET}" == "automode" ]]; then
       CONTEXT="${AUTOMODE_CLUSTER}"
     else
       CONTEXT="${KARPENTER_CLUSTER}"
@@ -99,25 +99,25 @@ echo "==> ${RUN_NAME} on ${CONTEXT}"
 if [[ "${WARM}" == true ]]; then
   echo "==> warm run: keeping the node, deleting only the pod"
 
-  # The arm's GPU is singular on these instance types, so the previous pod has to
+  # The variant's GPU is singular on these instance types, so the previous pod has to
   # be gone before the next one can be scheduled onto the same node.
   kubectl --context "${CONTEXT}" -n bench delete pod \
-    -l "workshop-arm=${NODEPOOL}" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
+    -l "workshop-variant=${NODEPOOL}" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
 
   NODE_COUNT="$(kubectl --context "${CONTEXT}" get nodeclaims \
     -l "karpenter.sh/nodepool=${NODEPOOL}" --no-headers 2>/dev/null | wc -l | tr -d ' ')"
   if [[ "${NODE_COUNT}" -eq 0 ]]; then
     echo "!!! no node exists for ${NODEPOOL} -- this will provision one and will NOT"
-    echo "    be a warm measurement. Run the cold arm first, then --warm."
+    echo "    be a warm measurement. Run the cold variant first, then --warm."
   else
     echo "    ${NODE_COUNT} node(s) still up, image should be cached"
   fi
 elif [[ "${TARGET}" == "weights" ]]; then
-  # Phase 2 compares loaders, not provisioning. Reuse the warm arm C node so the
+  # Phase 2 compares loaders, not provisioning. Reuse the warm variant C node so the
   # image pull does not swamp the numbers we are trying to see.
-  echo "==> reusing the arm C node if it is up (this compares loaders, not nodes)"
+  echo "==> reusing the variant C node if it is up (this compares loaders, not nodes)"
   kubectl --context "${CONTEXT}" -n bench delete pod \
-    -l "workshop-arm=${NODEPOOL}" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
+    -l "workshop-variant=${NODEPOOL}" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
 else
   "${HERE}/reset.sh" "${NODEPOOL}"
 fi
@@ -180,7 +180,7 @@ else
 fi
 
 # Written before the run so the raw dir is self-describing even if interrupted.
-printf '%s\n' "${RUN_NAME}" > "${RAW}/arm.txt"
+printf '%s\n' "${RUN_NAME}" > "${RAW}/variant.txt"
 printf '%s\n' "${GPU_INSTANCE_TYPE}" > "${RAW}/instance-type.txt"
 printf '%s\n' "${WORKLOAD_IMAGE}" > "${RAW}/image.txt"
 

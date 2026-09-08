@@ -17,53 +17,53 @@ that do the measurement are included.
 
 ## What gets measured / 何を計測するか
 
-There are four arms. The pod spec, instance type, VPC, subnets and container image are
+There are four variants. The pod spec, instance type, VPC, subnets and container image are
 the same in all four. The difference between them is how the container image reaches
 the node.
 
-arm は 4 つあります。Pod spec、インスタンスタイプ、VPC、サブネット、コンテナイメージは
+variant は 4 つあります。Pod spec、インスタンスタイプ、VPC、サブネット、コンテナイメージは
 4 つとも同じです。異なるのは、コンテナイメージがノードに届く方法です。
 
-| Arm | Node | Image mechanism | Configuration required |
+| Variant | Node | Image mechanism | Configuration required |
 |---|---|---|---|
-| **A** `arm-a-baseline` | Karpenter + Bottlerocket | EBS data volume, containerd's default sequential pull | none |
-| **B** `arm-b-snapshot` | Karpenter + Bottlerocket | data volume restored from an EBS snapshot that already holds the layers | build and maintain a snapshot per image version |
-| **C** `arm-c-soci` | Karpenter + Bottlerocket | container storage on local NVMe, SOCI snapshotter in parallel pull/unpack mode | `instanceStorePolicy` and 6 lines of Bottlerocket settings |
-| **D** `arm-d-automode` | EKS Auto Mode | local NVMe and parallel pull, both set up by the service | none |
+| `baseline` | Karpenter + Bottlerocket | EBS data volume, containerd's default sequential pull | none |
+| `snapshot` | Karpenter + Bottlerocket | data volume restored from an EBS snapshot that already holds the layers | build and maintain a snapshot per image version |
+| `soci` | Karpenter + Bottlerocket | container storage on local NVMe, SOCI snapshotter in parallel pull/unpack mode | `instanceStorePolicy` and 6 lines of Bottlerocket settings |
+| `automode` | EKS Auto Mode | local NVMe and parallel pull, both set up by the service | none |
 
-Two constraints apply to these arms.
+Two constraints apply to these variants.
 
 この 4 つには制約が 2 つあります。
 
 **B and C cannot both be used on the same node.** Both of them govern the volume that
-Bottlerocket uses for container images. Arm B requires the images to be on the volume
+Bottlerocket uses for container images. The snapshot variant requires the images to be on the volume
 restored from the snapshot. If you also set `instanceStorePolicy`, container storage
 moves to local NVMe and the restored volume is no longer used. You choose one of the
 two.
 
 **B と C は同じノードで併用できません。** どちらも、Bottlerocket がコンテナイメージに
-使うボリュームを対象にしています。arm B はスナップショットから復元したボリューム上に
+使うボリュームを対象にしています。snapshot はスナップショットから復元したボリューム上に
 イメージがあることを前提にしていますが、`instanceStorePolicy` も設定するとコンテナ
 ストレージはローカル NVMe に移り、復元したボリュームは使われなくなります。どちらか一方を
 選ぶことになります。
 
-**Arm B's mechanism is not available on EKS Auto Mode.** Auto Mode's `NodeClass`
+**The snapshot mechanism is not available on EKS Auto Mode.** Auto Mode's `NodeClass`
 exposes `ephemeralStorage` with the fields `size`, `iops`, `throughput` and
 `kmsKeyID`. There is no `snapshotID` field. If a workload needs pre-baked images, that
 workload cannot run on Auto Mode.
 
-**arm B の方式は EKS Auto Mode では使えません。** Auto Mode の `NodeClass` が公開する
+**snapshot の方式は EKS Auto Mode では使えません。** Auto Mode の `NodeClass` が公開する
 `ephemeralStorage` のフィールドは `size` / `iops` / `throughput` / `kmsKeyID` で、
 `snapshotID` はありません。イメージの事前焼き込みが必要なワークロードは Auto Mode では
 動かせません。
 
-Two further measurements follow the four arms.
+Two further measurements follow the four variants.
 
-4 つの arm の後に、さらに 2 つの計測を行います。
+4 つの variant の後に、さらに 2 つの計測を行います。
 
-- **Warm scale-out.** The same arm is run again on a node that is already running. The
-  four arms above all measure the first pod on a new node.
-  **warm スケールアウト。** 同じ arm を、すでに動いているノードに対して再実行します。
+- **Warm scale-out.** The same variant is run again on a node that is already running. The
+  four variants above all measure the first pod on a new node.
+  **warm スケールアウト。** 同じ variant を、すでに動いているノードに対して再実行します。
   上記 4 つはいずれも、新しいノードでの 1 個目の Pod を計測しています。
 - **How the model weights reach GPU memory.** Three variants, including Run:ai Model
   Streamer, with time to first token.
@@ -115,22 +115,22 @@ figures.
 | [6 — Model weights](steps/06-weights.md) | Three vLLM command lines, including Run:ai Model Streamer<br>vLLM の引数 3 通り（Run:ai Model Streamer を含む） |
 
 Two scripts display the configuration at the terminal. The demo calls both of them
-for each arm.
+for each variant.
 
-設定を端末に表示するスクリプトが 2 つあります。デモは各 arm でこの両方を呼びます。
+設定を端末に表示するスクリプトが 2 つあります。デモは各 variant でこの両方を呼びます。
 
 ```bash
-bin/show_config.sh arm-c-soci     # what changes and where, before you apply it
-bin/verify_config.sh arm-c-soci   # checks that it took effect, after you run it
+bin/show_config.sh soci     # what changes and where, before you apply it
+bin/verify_config.sh soci   # checks that it took effect, after you run it
 ```
 
-`show_config.sh` diffs the rendered manifests against the baseline arm and removes
-comments and lines that differ only by the arm's name, so the output contains only
+`show_config.sh` diffs the rendered manifests against the baseline and removes
+comments and lines that differ only by the variant's name, so the output contains only
 the configuration that differs. It reads the rendered manifests rather than a separate
 copy, so it stays consistent with what was applied.
 
-`show_config.sh` は展開済みのマニフェストをベースラインの arm と diff し、コメントと
-arm 名だけが異なる行を除きます。そのため出力には異なる設定だけが残ります。別途用意した
+`show_config.sh` は展開済みのマニフェストをベースラインと diff し、コメントと
+variant 名だけが異なる行を除きます。そのため出力には異なる設定だけが残ります。別途用意した
 コピーではなく展開済みマニフェストを読むので、適用内容と一致した状態を保ちます。
 
 `verify_config.sh` checks the mechanism itself: whether the volume came from the
@@ -161,10 +161,10 @@ instance type, region and registry conditions, so your figures will differ.
 - `aws`, `kubectl`, `terraform`, `jq`, `python3`
 - Credentials for an account in which you can create two EKS clusters
   EKS クラスターを 2 面作成できるアカウントの認証情報
-- **GPU quota.** All arms use one instance type, `g6.4xlarge`, which is 16 vCPU.
-  Running the arms one at a time needs 16 vCPU of *Running On-Demand G and VT
+- **GPU quota.** All variants use one instance type, `g6.4xlarge`, which is 16 vCPU.
+  Running them one at a time needs 16 vCPU of *Running On-Demand G and VT
   instances*. Requesting 64 leaves room for re-runs.
-  **GPU クォータ。** 全 arm が `g6.4xlarge`（16 vCPU）を使います。逐次実行なら 16 vCPU
+  **GPU クォータ。** 全 variant が `g6.4xlarge`（16 vCPU）を使います。逐次実行なら 16 vCPU
   で足りますが、64 を申請しておくと再実行の余地ができます。
   ```bash
   aws service-quotas get-service-quota --service-code ec2 \
@@ -188,16 +188,16 @@ even when no GPU nodes are running, so run the teardown when you have finished.
 `g6.4xlarge` has one L4 GPU, 16 vCPU, 600 GB of local NVMe, and up to 25 Gbps of
 network bandwidth.
 
-Local NVMe is required, because arms C and D both use it. The vCPU count affects the
+Local NVMe is required, because the soci and automode variants both use it. The vCPU count affects the
 result as well: SOCI's parallel unpack is CPU-bound, so a `2xlarge` produces a smaller
 improvement and an `8xlarge` a larger one than a typical inference node would. Set
-`GPU_INSTANCE_TYPE` in `config.env` to the type you use, and expect the arm C figure
+`GPU_INSTANCE_TYPE` in `config.env` to the type you use, and expect the soci figure
 to change with it.
 
-ローカル NVMe は arm C と D が使うため必須です。vCPU 数も結果に影響します。SOCI の並列
+ローカル NVMe は soci と automode が使うため必須です。vCPU 数も結果に影響します。SOCI の並列
 展開は CPU バウンドなので、`2xlarge` では一般的な推論ノードより改善幅が小さく、
 `8xlarge` では大きく出ます。`config.env` の `GPU_INSTANCE_TYPE` を実際に使う型に設定し、
-arm C の数字がそれに応じて変わることを前提にしてください。
+soci の数字がそれに応じて変わることを前提にしてください。
 
 ---
 
@@ -217,7 +217,7 @@ file:
 編集せずに 1 回だけ上書きできます。
 
 ```bash
-GPU_INSTANCE_TYPE=g6.8xlarge bin/bench.sh arm-c-soci
+GPU_INSTANCE_TYPE=g6.8xlarge bin/bench.sh soci
 ```
 
 Check that the workload image tag still exists. AWS Deep Learning Container tags are
@@ -252,8 +252,8 @@ This creates one shared VPC and two clusters:
 
 共有 VPC 1 つとクラスター 2 面を作成します。
 
-- `<prefix>-karpenter` — self-managed Karpenter, used by arms A, B and C
-- `<prefix>-automode` — EKS Auto Mode, used by arm D
+- `<prefix>-karpenter` — self-managed Karpenter, used by baseline, snapshot and soci
+- `<prefix>-automode` — EKS Auto Mode, used by automode
 
 There are two clusters because self-managed Karpenter and Auto Mode both own the
 `karpenter.sh` CRDs. The clusters share the VPC and subnets, so the image pull path is
@@ -282,15 +282,15 @@ NVIDIA AMI にドライバ、container toolkit、Kubernetes device plugin が含
 Auto Mode は自前で用意します。readiness probe はコンテナ内で `nvidia-smi` を実行するため、
 Pod が Ready になればコンテナから GPU が使える状態だと分かります。
 
-### 3. Build the arm B snapshot / arm B のスナップショット作成
+### 3. Build the snapshot / snapshot 用スナップショット作成
 
-Run arm A first and do not reset afterwards, then snapshot that node's data volume:
+Run the baseline first and do not reset afterwards, then snapshot that node's data volume:
 
-先に arm A を実行し、その後 reset せずに、そのノードのデータボリュームをスナップショット
+先に baseline を実行し、その後 reset せずに、そのノードのデータボリュームをスナップショット
 します。
 
 ```bash
-./bin/bench.sh arm-a-baseline        # leaves a node with the image cached
+./bin/bench.sh baseline        # leaves a node with the image cached
 ./snapshot/snapshot-from-node.sh     # takes 3-5 minutes
 ```
 
@@ -316,54 +316,54 @@ from there.
 >
 > Snapshotting a node from the workshop itself also means the cached layers were
 > written by the same containerd and OS version that will read them later. The node
-> must be an arm A node. Arm C's `instanceStorePolicy` moves container storage to local
+> must be a baseline node. The soci variant's `instanceStorePolicy` moves container storage to local
 > NVMe, so its EBS data volume is empty.
 >
 > ワークショップ内のノードをスナップショットする方式では、キャッシュされた層を書いた
-> containerd と OS のバージョンが、後で読む側と同じになります。対象は arm A のノードで
-> ある必要があります。arm C は `instanceStorePolicy` によりコンテナストレージがローカル
+> containerd と OS のバージョンが、後で読む側と同じになります。対象は baseline のノードで
+> ある必要があります。soci は `instanceStorePolicy` によりコンテナストレージがローカル
 > NVMe に移るため、EBS データボリュームは空です。
 
-The time this takes is part of the cost of arm B, and it recurs whenever the image
-changes. Compare it against arm B's measured improvement in section 5.
+The time this takes is part of the cost of the snapshot variant, and it recurs whenever the image
+changes. Compare it against the snapshot variant's measured improvement in section 5.
 
-この所要時間は arm B のコストの一部で、イメージが変わるたびに発生します。セクション 5 で
-arm B の実測改善幅と比較してください。
+この所要時間は snapshot のコストの一部で、イメージが変わるたびに発生します。セクション 5 で
+snapshot の実測改善幅と比較してください。
 
-### 4. Apply the arms / arm の適用
+### 4. Apply the variants / variant の適用
 
 ```bash
 ./bin/prep.sh
 ```
 
-This renders the manifests using the Terraform outputs, applies each arm to the
+This renders the manifests using the Terraform outputs, applies each variant to the
 appropriate cluster, and checks that the Bottlerocket AMI is at least 1.44.0. SOCI
 parallel pull/unpack was added in 1.44.0. On an earlier version the snapshotter
-setting is ignored without an error, the node boots and the pod runs, and arm C
-measures the same thing as arm A. The resulting figures would suggest that SOCI has no
+setting is ignored without an error, the node boots and the pod runs, and soci
+measures the same thing as the baseline variant. The resulting figures would suggest that SOCI has no
 effect.
 
-Terraform の出力を使ってマニフェストを展開し、各 arm を該当クラスターに適用し、
+Terraform の出力を使ってマニフェストを展開し、各 variant を該当クラスターに適用し、
 Bottlerocket AMI が 1.44.0 以上であることを確認します。SOCI の parallel pull/unpack は
 1.44.0 で追加されました。それより前のバージョンでは snapshotter の設定がエラーなしで
-無視され、ノードは起動し Pod も動き、arm C は arm A と同じものを計測します。その結果の
+無視され、ノードは起動し Pod も動き、soci は baseline と同じものを計測します。その結果の
 数字は「SOCI に効果がない」ように見えます。
 
 ---
 
 ## Running it / 実行
 
-Run one arm at a time. Each run deletes that arm's node first, so each measurement
+Run one variant at a time. Each run deletes that variant's node first, so each measurement
 starts from a cold node.
 
-arm は 1 つずつ実行します。各実行はまずその arm のノードを削除するため、毎回コールドな
+variant は 1 つずつ実行します。各実行はまずその variant のノードを削除するため、毎回コールドな
 ノードから計測が始まります。
 
 ```bash
-./bin/bench.sh arm-a-baseline
-./bin/bench.sh arm-b-snapshot
-./bin/bench.sh arm-c-soci
-./bin/bench.sh arm-d-automode
+./bin/bench.sh baseline
+./bin/bench.sh snapshot
+./bin/bench.sh soci
+./bin/bench.sh automode
 ```
 
 Each step's figure is printed when that step completes, so the breakdown appears
@@ -395,13 +395,13 @@ of each step.
 `at` は Pod の `creationTimestamp` を起点としています。最終集計表と同じ起点なので、
 実行中の出力とレポートの数字は一致します。`step took` が各段階の所要時間です。
 
-When the arm finishes, `stages.py` prints the breakdown again together with the node's
+When the variant finishes, `stages.py` prints the breakdown again together with the node's
 instance type, availability zone and OS image, and the effective image throughput.
 Throughput is the compressed image size divided by the observed pull duration, so it
 includes both download and unpack. Throughput can be compared across different images,
 which the elapsed figures cannot.
 
-arm が終了すると、`stages.py` がノードのインスタンスタイプ、AZ、OS イメージとあわせて
+variant が終了すると、`stages.py` がノードのインスタンスタイプ、AZ、OS イメージとあわせて
 内訳を再表示し、実効イメージスループットを出力します。スループットは圧縮イメージサイズ ÷
 実測 pull 時間で、ダウンロードと展開の両方を含みます。経過時間と違い、スループットは
 イメージが異なる環境間でも比較できます。
@@ -409,7 +409,7 @@ arm が終了すると、`stages.py` がノードのインスタンスタイプ�
 ### Warm scale-out / warm スケールアウト
 
 ```bash
-./bin/bench.sh arm-c-soci --warm
+./bin/bench.sh soci --warm
 ```
 
 This deletes only the pod, keeps the NodeClaim, and submits the pod again. The pod is
@@ -423,20 +423,20 @@ GPU が 1 基なので、GPU を要求する Pod は 2 つ同じノードで動�
 `report.py` then prints both figures:
 
 ```
-  arm-c-soci: cold 97s -> warm 1s (once-per-node cost 96s)
+  soci: cold 97s -> warm 1s (once-per-node cost 96s)
 ```
 
 The last figure is the portion that a node which is already running does not incur. If
 that portion is large relative to the total, the mechanisms in this workshop affect
 most of the startup time. If it is small, the startup time is mostly in the pod
 itself, and node capacity policy has more effect than image delivery. Running this
-measurement also shows how much of arm B's improvement applies only to the first pod
+measurement also shows how much of the snapshot variant's improvement applies only to the first pod
 on a node.
 
 最後の数字は、すでに動いているノードでは発生しない部分です。この部分が全体に対して大きい
 場合、本ワークショップの各方式が起動時間の大部分に影響します。小さい場合、起動時間の大半は
 Pod 側にあり、イメージ配送よりノードのキャパシティ方針の方が効きます。この計測により、
-arm B の改善のうちノードの 1 個目の Pod にしか効かない分も分かります。
+snapshot の改善のうちノードの 1 個目の Pod にしか効かない分も分かります。
 
 ### Phase 2 — how the weights reach GPU memory / ウェイトが GPU メモリに届く経路
 
@@ -535,8 +535,8 @@ it does not need a port-forward and does not require `curl` in the image.
 ### Resetting / リセット
 
 ```bash
-./bin/reset.sh                 # all arms
-./bin/reset.sh arm-c-soci      # one arm
+./bin/reset.sh                 # all variants
+./bin/reset.sh soci            # one variant
 ```
 
 ---
@@ -603,48 +603,48 @@ filename, and rehearsal output is written to `rehearsal/.sandbox/` rather than
 `results/report.md` は段階を 3 つに分類します。
 
 - **Provisioning** — Karpenter's decision, the EC2 launch, boot, registration, node
-  Ready and binding. In the reference run this was similar across all four arms. A
+  Ready and binding. In the reference run this was similar across all four variants. A
   large difference here usually indicates instance-type availability rather than
   configuration.
   **プロビジョニング** — Karpenter の判断、EC2 起動、ブート、登録、ノード Ready、バインド。
-  参考計測では 4 arm でほぼ同じでした。ここに大きな差がある場合、通常は設定ではなく
+  参考計測では 4 variant でほぼ同じでした。ここに大きな差がある場合、通常は設定ではなく
   インスタンスタイプの在庫が原因です。
-- **Image** — the pull and unpack. Arms B, C and D each address this differently.
-  **イメージ** — pull と展開。arm B / C / D がそれぞれ異なる方法で扱います。
+- **Image** — the pull and unpack. The snapshot, soci and automode variants each address this differently.
+  **イメージ** — pull と展開。snapshot / soci / automode がそれぞれ異なる方法で扱います。
 - **Workload** — container start, and in phase 2 the weight download and model load.
   **ワークロード** — コンテナ起動、およびフェーズ 2 のウェイトダウンロードとモデルロード。
 
-Arm A and arm C differ by one mechanism, with the same provisioner, OS and instance
-type, so their difference is attributable to that mechanism. Arm D also runs on a
+The baseline and SOCI variants differ by one mechanism, with the same provisioner, OS and instance
+type, so their difference is attributable to that mechanism. The Auto Mode variant also runs on a
 different control plane, so its figures indicate what Auto Mode provides without
 configuration rather than a direct comparison.
 
-arm A と arm C は、プロビジョナ・OS・インスタンスタイプが同じで、異なるのは 1 つの方式
-だけなので、差はその方式に帰属できます。arm D はコントロールプレーンも異なるため、
+baseline と soci は、プロビジョナ・OS・インスタンスタイプが同じで、異なるのは 1 つの方式
+だけなので、差はその方式に帰属できます。automode はコントロールプレーンも異なるため、
 数字は直接比較ではなく、Auto Mode が設定なしで提供する内容を示すものとして読みます。
 
 The report also lists the instance type, availability zone, OS image and runtime read
-from each node, so the assumption that the arms ran on equivalent hardware can be
-checked. If the arms did not all use the same instance type, the report says so.
+from each node, so the assumption that the variants ran on equivalent hardware can be
+checked. If they did not all use the same instance type, the report says so.
 
 レポートには各ノードから読み取ったインスタンスタイプ、AZ、OS イメージ、ランタイムも
-記載されるため、arm が同等のハードウェアで動いたという前提を確認できます。arm 間で
+記載されるため、variant が同等のハードウェアで動いたという前提を確認できます。variant 間で
 インスタンスタイプが揃わなかった場合はその旨が出力されます。
 
 ### Limits of the figures / 数字の限界
 
-- Each arm was run once. Pull times vary with registry and network conditions.
+- Each variant was run once. Pull times vary with registry and network conditions.
   Differences below about 10% should be confirmed by a repeat run before being relied
   on. `report.py` retains earlier runs rather than replacing them.
-  各 arm は 1 回の計測です。pull 時間はレジストリとネットワークの状況で変わります。
+  各 variant は 1 回の計測です。pull 時間はレジストリとネットワークの状況で変わります。
   10% 程度未満の差は、再実行で確認してから判断してください。`report.py` は以前の結果を
   置き換えずに残します。
-- The time to build arm B's snapshot is not in the table. It is the recurring cost of
+- The time to build the snapshot is not in the table. It is the recurring cost of
   that mechanism.
-  arm B のスナップショット作成時間は表に含まれていません。この方式の継続的なコストです。
-- Arm C's SOCI settings are the values AWS publishes as a starting point. Layer count,
+  snapshot 用スナップショット作成時間は表に含まれていません。この方式の継続的なコストです。
+- The SOCI variant's settings are the values AWS publishes as a starting point. Layer count,
   layer size and vCPU affect which values are appropriate.
-  arm C の SOCI 設定は AWS が出発点として公開している値です。適切な値はレイヤ数、レイヤ
+  soci の SOCI 設定は AWS が出発点として公開している値です。適切な値はレイヤ数、レイヤ
   サイズ、vCPU によって変わります。
 
 ---
@@ -653,9 +653,9 @@ checked. If the arms did not all use the same instance type, the report says so.
 
 | If / 条件 | Then / 選択 | Because / 理由 |
 |---|---|---|
-| Images change rarely and startup latency matters<br>イメージ更新が稀で起動遅延が重要 | Arm B, the snapshot | No pull occurs. A snapshot rebuild is needed per image version.<br>pull が発生しない。イメージ版ごとに再作成が必要 |
-| Images change often<br>イメージ更新が頻繁 | Arm C, SOCI on NVMe | No per-image preparation, no build-pipeline change, image unchanged.<br>イメージ単位の準備もビルド変更も不要、イメージは無改変 |
-| You do not want to maintain either<br>どちらも運用したくない | Arm D, Auto Mode | Arm C's behaviour without arm C's configuration. Arm B's mechanism and SOCI's settings are not available.<br>arm C の挙動を設定なしで得られる。arm B の方式と SOCI の設定項目は使えない |
+| Images change rarely and startup latency matters<br>イメージ更新が稀で起動遅延が重要 | `snapshot` | No pull occurs. A snapshot rebuild is needed per image version.<br>pull が発生しない。イメージ版ごとに再作成が必要 |
+| Images change often<br>イメージ更新が頻繁 | `soci` | No per-image preparation, no build-pipeline change, image unchanged.<br>イメージ単位の準備もビルド変更も不要、イメージは無改変 |
+| You do not want to maintain either<br>どちらも運用したくない | `automode` | The soci variant's behaviour without the SOCI variant's configuration. The snapshot mechanism and SOCI's settings are not available.<br>soci の挙動を設定なしで得られる。snapshot の方式と SOCI の設定項目は使えない |
 | Weight loading takes longer than the pull<br>pull よりウェイト読み込みが長い | Stream from S3 | Reducing image size does not help if model load is the larger component.<br>モデルロードの方が大きいならイメージ縮小は効かない |
 | Warm-node startup already dominates<br>warm ノードの起動時間が既に大半 | None of these; node capacity policy | If the once-per-node cost is small relative to steady-state startup, image delivery is not the main factor.<br>ノード 1 回のコストが定常起動に比べ小さいなら、イメージ配送は主要因ではない |
 
@@ -675,9 +675,9 @@ the second.
 cd terraform && terraform destroy
 ```
 
-The arm B snapshot and the staged weights are not managed by Terraform:
+The snapshot and the staged weights are not managed by Terraform:
 
-arm B のスナップショットと S3 上のウェイトは Terraform の管理外です。
+snapshot 用スナップショットと S3 上のウェイトは Terraform の管理外です。
 
 ```bash
 aws ec2 delete-snapshot --snapshot-id "$(cat results/snapshot-id.txt)" --region us-west-2
@@ -692,20 +692,20 @@ aws s3 rm "s3://$MODEL_BUCKET/$MODEL_PREFIX/" --recursive
 config.env                        settings; read by all the scripts
 terraform/                        shared VPC, two clusters, model bucket, Pod Identity
 manifests/
-  karpenter/                      arms A, B, C  (EC2NodeClass + NodePool)
-  automode/                       arm D         (NodeClass + NodePool)
+  karpenter/                      baseline, snapshot, soci  (EC2NodeClass + NodePool)
+  automode/                       automode                  (NodeClass + NodePool)
   workload.yaml                   phase 1: the measured pod, cold and warm
   workload-weights.yaml           phase 2: one spec, three loader variants
   fragments/init-copy-weights.yaml  the S3-to-disk copy, used by two variants
   rendered/                       generated by prep.sh; what was applied
 snapshot/
-  snapshot-from-node.sh           arm B preparation
-  build-snapshot.sh               arm B preparation via aws-samples (did not work here)
+  snapshot-from-node.sh           snapshot preparation
+  build-snapshot.sh               snapshot preparation via aws-samples (did not work here)
   stage-model.sh                  phase 2 preparation
 bin/
   prep.sh                         render, apply, check versions
-  bench.sh                        run one arm, collect, compute
-  reset.sh                        return an arm to a cold state
+  bench.sh                        run one variant, collect, compute
+  reset.sh                        return a variant to a cold state
   watch_stages.py                 prints each step's figure as it completes
   stages.py                       timestamps to stage breakdown
   report.py                       all runs to comparison and results/report.md
@@ -713,7 +713,7 @@ bin/
   render_weights.py               phase 2 render (handles multi-line insertion)
   check_runai.sh                  checks the image supports Run:ai streaming
   assert_br_version.py            checks the Bottlerocket version for SOCI
-  show_config.sh                  what an arm changes and where, before applying
+  show_config.sh                  what a variant changes and where, before applying
   verify_config.sh                checks the setting took effect, after running
   demo.sh                         the narrated sequence, for recording
   record.sh                       asciinema to gif to mp4

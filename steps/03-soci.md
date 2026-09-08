@@ -30,7 +30,7 @@ SOCI index の作成は不要で、イメージは変更せず、ビルドパイ
 ## The configuration change / 設定変更
 
 Two additions to the node class, in
-[`12-arm-c-soci.yaml`](../manifests/karpenter/12-arm-c-soci.yaml):
+[`12-soci.yaml`](../manifests/karpenter/12-soci.yaml):
 
 node class への追加は 2 箇所です。
 
@@ -38,7 +38,7 @@ node class への追加は 2 箇所です。
 apiVersion: karpenter.k8s.aws/v1
 kind: EC2NodeClass
 metadata:
-  name: arm-c-soci
+  name: soci
 spec:
   amiSelectorTerms:
     - alias: bottlerocket@latest
@@ -110,13 +110,13 @@ and vCPU affect which values are appropriate for a given image.
 
 SOCI parallel pull/unpack was added in Bottlerocket 1.44.0. On an earlier version,
 `snapshotter = "soci"` is ignored without an error: the node boots, the pod runs, and
-this arm measures the same thing as step 1. The resulting figures would suggest SOCI
-has no effect. `bin/prep.sh` checks the version before the arms run.
+this variant measures the same thing as step 1. The resulting figures would suggest SOCI
+has no effect. `bin/prep.sh` checks the version before the variants run.
 
 SOCI の parallel pull/unpack は Bottlerocket 1.44.0 で追加されました。それより前の
 バージョンでは `snapshotter = "soci"` がエラーなしで無視され、ノードは起動し Pod も動き、
-この arm はステップ 1 と同じものを計測します。その結果の数字は SOCI に効果がないように
-見えます。`bin/prep.sh` は arm の実行前にバージョンを確認します。
+この variant はステップ 1 と同じものを計測します。その結果の数字は SOCI に効果がないように
+見えます。`bin/prep.sh` は variant の実行前にバージョンを確認します。
 
 ---
 
@@ -124,8 +124,8 @@ SOCI の parallel pull/unpack は Bottlerocket 1.44.0 で追加されました�
 
 ```bash
 bin/prep.sh
-bin/show_config.sh arm-c-soci     # shows both additions as a diff against step 1
-bin/bench.sh arm-c-soci
+bin/show_config.sh soci     # shows both additions as a diff against step 1
+bin/bench.sh soci
 ```
 
 ---
@@ -133,7 +133,7 @@ bin/bench.sh arm-c-soci
 ## Verify / 検証
 
 ```bash
-bin/verify_config.sh arm-c-soci
+bin/verify_config.sh soci
 ```
 
 Three checks, with their limits stated:
@@ -155,9 +155,9 @@ Three checks, with their limits stated:
    Bottlerocket が 1.44.0 以降か。
 
 The throughput figure indicates whether SOCI ran. If the setting were being ignored,
-this arm's throughput would match step 1's.
+this variant's throughput would match step 1's.
 
-SOCI が動作したかはスループットの数字から判断できます。設定が無視されていれば、この arm の
+SOCI が動作したかはスループットの数字から判断できます。設定が無視されていれば、この variant の
 スループットはステップ 1 と同じ値になります。
 
 ---
@@ -173,8 +173,8 @@ SOCI が動作したかはスループットの数字から判断できます。
   type, so the difference is attributable to that mechanism.
   ステップ 1 と 3 は、プロビジョナ・OS・インスタンスタイプが同じで、異なるのは 1 つの
   方式だけです。差はその方式に帰属できます。
-- This arm and step 2 cannot both be applied to the same node.
-  この arm とステップ 2 は同じノードに併用できません。
+- This variant and step 2 cannot both be applied to the same node.
+  この variant とステップ 2 は同じノードに併用できません。
 
 ---
 

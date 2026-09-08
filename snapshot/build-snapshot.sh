@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Arm B pre-work: bake the workload image into an EBS snapshot that Bottlerocket
+# Variant B pre-work: bake the workload image into an EBS snapshot that Bottlerocket
 # mounts as its data volume, so nothing is pulled at node start.
 #
 # This takes 10-20 minutes for a multi-GB image. Run it the day before, not live.
@@ -9,7 +9,7 @@
 # volume and terminates the instance.
 #
 # The snapshot ID is written to results/snapshot-id.txt and to an SSM parameter,
-# and bin/prep.sh substitutes it into the arm B EC2NodeClass.
+# and bin/prep.sh substitutes it into the snapshot EC2NodeClass.
 
 set -euo pipefail
 
@@ -30,7 +30,7 @@ if [[ -z "${IMAGE}" ]]; then
   exit 2
 fi
 
-# The NVIDIA variant, so the cached layers land on the same OS the arms run.
+# The NVIDIA variant, so the cached layers land on the same OS the variants run on.
 AMI_SSM_PATH="/aws/service/bottlerocket/aws-k8s-${K8S_VERSION}-nvidia/x86_64/latest/image_id"
 
 echo "==> region                ${REGION}"
@@ -64,4 +64,4 @@ printf '%s\n' "${SNAPSHOT_ID}" > "${ROOT}/results/snapshot-id.txt"
 echo
 echo "==> snapshot ${SNAPSHOT_ID}"
 echo "==> written to results/snapshot-id.txt and SSM ${SSM_PARAM}"
-echo "==> bin/prep.sh will substitute it into the arm B EC2NodeClass"
+echo "==> bin/prep.sh will substitute it into the snapshot EC2NodeClass"

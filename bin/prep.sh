@@ -38,9 +38,9 @@ aws eks update-kubeconfig --region "${REGION}" --name "${AUTOMODE_CLUSTER}" --al
 ################################################################################
 # Assert the Bottlerocket AMI is new enough for SOCI.
 #
-# SOCI parallel pull/unpack landed in Bottlerocket 1.44.0. If arm C silently runs
-# on something older, the snapshotter setting is ignored and arm C measures the
-# same thing as arm A -- a failure mode that looks like "SOCI does not help".
+# SOCI parallel pull/unpack landed in Bottlerocket 1.44.0. If variant C silently runs
+# on something older, the snapshotter setting is ignored and variant C measures the
+# same thing as the baseline variant -- a failure mode that looks like "SOCI does not help".
 ################################################################################
 echo "==> checking Bottlerocket version"
 K8S_VERSION="$(aws eks describe-cluster --region "${REGION}" --name "${KARPENTER_CLUSTER}" \
@@ -64,7 +64,7 @@ echo "    kubernetes ${K8S_VERSION}, bottlerocket nvidia ${BR_VERSION} (${BR_AMI
 python3 "${HERE}/assert_br_version.py" "bottlerocket-v${BR_VERSION}" 1.44.0
 
 ################################################################################
-# Arms A, B, C on the Karpenter cluster
+# Variants A, B, C on the Karpenter cluster
 ################################################################################
 SNAPSHOT_ID=""
 if [[ -f "${ROOT}/results/snapshot-id.txt" ]]; then
@@ -86,10 +86,10 @@ render() {
     "${src}" > "${dst}"
 }
 
-echo "==> rendering + applying arms A/B/C to ${KARPENTER_CLUSTER}"
+echo "==> rendering + applying variants A/B/C to ${KARPENTER_CLUSTER}"
 for f in "${ROOT}"/manifests/karpenter/*.yaml; do
   base="$(basename "${f}")"
-  if [[ "${base}" == *arm-b-snapshot* && -z "${SNAPSHOT_ID}" ]]; then
+  if [[ "${base}" == *snapshot* && -z "${SNAPSHOT_ID}" ]]; then
     echo "    skipping ${base}: no snapshot yet. Run snapshot/build-snapshot.sh first."
     continue
   fi
@@ -113,13 +113,13 @@ kubectl --context "${KARPENTER_CLUSTER}" -n bench create configmap ttft-probe \
   --dry-run=client -o yaml | kubectl --context "${KARPENTER_CLUSTER}" -n bench apply -f -
 
 ################################################################################
-# Arm D on the Auto Mode cluster
+# Variant D on the Auto Mode cluster
 #
 # The built-in "default" NodeClass is read-only, so the custom NodeClass has to
 # reuse its node IAM role. Read it off the cluster rather than plumbing it
 # through Terraform -- this is the method the EKS docs give.
 ################################################################################
-echo "==> rendering + applying arm D to ${AUTOMODE_CLUSTER}"
+echo "==> rendering + applying variant D to ${AUTOMODE_CLUSTER}"
 AUTOMODE_NODE_ROLE="$(kubectl --context "${AUTOMODE_CLUSTER}" get nodeclass default -o jsonpath='{.spec.role}')"
 echo "    auto mode node role : ${AUTOMODE_NODE_ROLE}"
 
@@ -146,17 +146,17 @@ echo "==> Run:ai streaming support (phase 2)"
 echo "    not checked here. Confirming it means pulling a ~9 GB image, which takes"
 echo "    minutes. A check that times out reports a false negative, so it is run"
 echo "    separately against a node that already has the image:"
-echo "        bin/bench.sh arm-c-soci      # warms the node"
+echo "        bin/bench.sh soci      # warms the node"
 echo "        bin/check_runai.sh"
 echo "    Phase 2 will also fail loudly and immediately if it is missing."
 
 echo
 echo "==> ready"
-echo "    phase 1, cold:  bin/bench.sh arm-a-baseline"
-echo "                    bin/bench.sh arm-b-snapshot"
-echo "                    bin/bench.sh arm-c-soci"
-echo "                    bin/bench.sh arm-d-automode"
-echo "    warm scale-out: bin/bench.sh arm-c-soci --warm"
+echo "    phase 1, cold:  bin/bench.sh baseline"
+echo "                    bin/bench.sh snapshot"
+echo "                    bin/bench.sh soci"
+echo "                    bin/bench.sh automode"
+echo "    warm scale-out: bin/bench.sh soci --warm"
 echo "    phase 2:        bin/bench.sh weights s3-initcontainer"
 echo "                    bin/bench.sh weights runai-local"
 echo "                    bin/bench.sh weights runai-s3"
