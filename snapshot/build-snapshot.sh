@@ -1,0 +1,67 @@
+#!/usr/bin/env bash
+#
+# Arm B pre-work: bake the workload image into an EBS snapshot that Bottlerocket
+# mounts as its data volume, so nothing is pulled at node start.
+#
+# This takes 10-20 minutes for a multi-GB image. Run it the day before, not live.
+# It wraps aws-samples/bottlerocket-images-cache, which launches a Bottlerocket
+# instance, pulls the images over SSM, stops the instance, snapshots the data
+# volume and terminates the instance.
+#
+# The snapshot ID is written to results/snapshot-id.txt and to an SSM parameter,
+# and bin/prep.sh substitutes it into the arm B EC2NodeClass.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "${HERE}/.." && pwd)"
+
+REGION="${REGION:-us-west-2}"
+K8S_VERSION="${K8S_VERSION:-1.34}"
+IMAGE="${IMAGE:-}"
+SNAPSHOT_SIZE="${SNAPSHOT_SIZE:-80}"
+BUILDER_INSTANCE_TYPE="${BUILDER_INSTANCE_TYPE:-m6i.4xlarge}"
+SSM_PARAM="${SSM_PARAM:-/bottlerocket-workshop/image-cache-snapshot-id}"
+WORKDIR="${WORKDIR:-/tmp/bottlerocket-images-cache}"
+
+if [[ -z "${IMAGE}" ]]; then
+  echo "IMAGE is required. Example:" >&2
+  echo "  IMAGE=763104351884.dkr.ecr.us-west-2.amazonaws.com/vllm:0.22.0-gpu-py312-cu130-ubuntu22.04-ec2 $0" >&2
+  exit 2
+fi
+
+# The NVIDIA variant, so the cached layers land on the same OS the arms run.
+AMI_SSM_PATH="/aws/service/bottlerocket/aws-k8s-${K8S_VERSION}-nvidia/x86_64/latest/image_id"
+
+echo "==> region                ${REGION}"
+echo "==> bottlerocket AMI path ${AMI_SSM_PATH}"
+echo "==> image                 ${IMAGE}"
+echo "==> snapshot size         ${SNAPSHOT_SIZE} GiB"
+
+if [[ ! -d "${WORKDIR}" ]]; then
+  git clone --depth 1 https://github.com/aws-samples/bottlerocket-images-cache "${WORKDIR}"
+fi
+
+# The image lives in the AWS Deep Learning Containers account. The builder pulls
+# it over SSM using the instance role, which the sample script grants ECR read.
+"${WORKDIR}/snapshot.sh" \
+  -r "${REGION}" \
+  -a "${AMI_SSM_PATH}" \
+  -i "${BUILDER_INSTANCE_TYPE}" \
+  -s "${SNAPSHOT_SIZE}" \
+  -op "${SSM_PARAM}" \
+  "${IMAGE}"
+
+SNAPSHOT_ID="$(aws ssm get-parameter \
+  --region "${REGION}" \
+  --name "${SSM_PARAM}" \
+  --query 'Parameter.Value' \
+  --output text)"
+
+mkdir -p "${ROOT}/results"
+printf '%s\n' "${SNAPSHOT_ID}" > "${ROOT}/results/snapshot-id.txt"
+
+echo
+echo "==> snapshot ${SNAPSHOT_ID}"
+echo "==> written to results/snapshot-id.txt and SSM ${SSM_PARAM}"
+echo "==> bin/prep.sh will substitute it into the arm B EC2NodeClass"

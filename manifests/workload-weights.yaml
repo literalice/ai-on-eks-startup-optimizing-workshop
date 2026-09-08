@@ -1,0 +1,109 @@
+################################################################################
+# Phase 2 -- section 4: how the model weights reach GPU memory.
+#
+# One pod spec, three load paths, selected by bench.sh. All three run on the arm C
+# node class with the same model, so the only variable is the loader.
+#
+#   s3-initcontainer  init container copies S3 -> local disk with s5cmd, then
+#                     vLLM's default safetensors loader reads from disk.
+#                     This is the obvious implementation, and it has a defect:
+#                     kubelet pulls the init image, runs the init container, and
+#                     only *then* pulls the workload image. The copy and the image
+#                     pull are serialised, so start-to-Ready can go up even though
+#                     the image got smaller.
+#
+#   runai-local       same copy, but Run:ai Model Streamer reads the safetensors
+#                     concurrently into a CPU buffer and streams to GPU rather
+#                     than loading tensor by tensor. Isolates the loader from the
+#                     delivery: identical bytes on identical disk.
+#
+#   runai-s3          no copy at all. The streamer reads S3 directly, so the init
+#                     container disappears and with it the serialisation above.
+#                     This is the variant that answers "what does Run:ai buy us".
+#
+# runai-streamer already ships in the AWS vLLM Deep Learning Container base
+# image, so none of this needs a custom build. prep.sh verifies that rather than
+# trusting it.
+#
+# @INIT_CONTAINERS@ is replaced by bench.sh with either the s5cmd init container
+# block (fragments/init-s5cmd.yaml, which carries the bucket and prefix) or
+# nothing. @VLLM_MODEL_ARG@ and @VLLM_LOAD_ARGS@ carry the loader choice.
+# @MODEL_NAME@, @IMAGE@, @REGION@ and @VARIANT@ are also substituted there.
+################################################################################
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "bench-weights-@VARIANT@"
+  namespace: bench
+  labels:
+    app: bench
+    workshop-arm: arm-c-soci
+    phase: weights
+    variant: "@VARIANT@"
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 0
+  # Credentials for the weights bucket come from EKS Pod Identity, bound to this
+  # service account by Terraform. Not the node role: Karpenter defaults the IMDS hop
+  # limit to 1, so a container cannot reach instance metadata and the AWS SDK reports
+  # "Unable to locate credentials". Keeping that default and scoping permissions to
+  # the service account is also what this workshop recommends for production.
+  serviceAccountName: bench
+  nodeSelector:
+    workshop-arm: arm-c-soci
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  volumes:
+    - name: models
+      emptyDir: {}
+    - name: probe
+      configMap:
+        name: ttft-probe
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 4Gi
+@INIT_CONTAINERS@
+  containers:
+    - name: vllm
+      image: "@IMAGE@"
+      imagePullPolicy: IfNotPresent
+      command: ["bash", "-c"]
+      args:
+        - |
+          exec python3 -m vllm.entrypoints.openai.api_server \
+            --model @VLLM_MODEL_ARG@ \
+            --served-model-name @MODEL_NAME@ \
+            @VLLM_LOAD_ARGS@ \
+            --max-model-len 4096 \
+            --gpu-memory-utilization 0.85 \
+            --port 8000
+      env:
+        # The streamer's S3 reader uses the AWS SDK, which picks up the node role
+        # through IMDS. Region has to be explicit -- the SDK will not infer it
+        # inside a container.
+        - name: AWS_REGION
+          value: "@REGION@"
+        - name: AWS_DEFAULT_REGION
+          value: "@REGION@"
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 5
+        periodSeconds: 2
+        failureThreshold: 300
+      resources:
+        requests:
+          nvidia.com/gpu: 1
+        limits:
+          nvidia.com/gpu: 1
+      volumeMounts:
+        - name: models
+          mountPath: /models
+        - name: probe
+          mountPath: /probe
+        - name: shm
+          mountPath: /dev/shm

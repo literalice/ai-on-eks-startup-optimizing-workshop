@@ -1,0 +1,61 @@
+################################################################################
+# The measured workload, phase 1: image pull only.
+#
+# One bare Pod, not a Deployment -- creationTimestamp is then exactly the moment
+# the scheduler first sees demand, with no ReplicaSet indirection in between.
+#
+# The identical pod spec runs on all four arms. Only @ARM_NAME@ changes, which
+# picks the NodePool. Whatever difference the table shows is the node, not the
+# workload.
+#
+# The container does not load a model. That isolates the image-pull stages, which
+# is what sections 1-3 are about. Model load is measured separately by
+# workload-s3-weights.yaml.
+#
+# The readiness probe runs nvidia-smi, so "Ready" means the GPU is actually
+# usable from inside the container -- proving the Bottlerocket NVIDIA variant's
+# driver, container toolkit and built-in device plugin all came up, with no
+# device plugin DaemonSet deployed anywhere in this cluster.
+#
+# @POD_NAME@, @ARM_NAME@ and @IMAGE@ are substituted by bin/bench.sh. @POD_NAME@ is
+# separate from @ARM_NAME@ so a warm re-run gets its own pod name while still
+# selecting the same arm's node.
+################################################################################
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "@POD_NAME@"
+  namespace: bench
+  labels:
+    app: bench
+    workshop-arm: "@ARM_NAME@"
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 0
+  nodeSelector:
+    workshop-arm: "@ARM_NAME@"
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: workload
+      image: "@IMAGE@"
+      imagePullPolicy: IfNotPresent
+      command: ["bash", "-c"]
+      args:
+        - |
+          nvidia-smi -L
+          trap 'exit 0' TERM
+          sleep 3600 & wait
+      readinessProbe:
+        exec:
+          command: ["bash", "-c", "nvidia-smi -L"]
+        initialDelaySeconds: 0
+        periodSeconds: 2
+        failureThreshold: 60
+      resources:
+        requests:
+          nvidia.com/gpu: 1
+        limits:
+          nvidia.com/gpu: 1

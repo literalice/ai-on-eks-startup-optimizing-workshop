@@ -1,0 +1,29 @@
+  initContainers:
+    - name: fetch-weights
+      image: public.ecr.aws/aws-cli/aws-cli:latest
+      command: ["bash", "-c"]
+      args:
+        - |
+          set -euo pipefail
+          echo "download start $(date -u +%FT%TZ)"
+          # aws s3 cp rather than s5cmd. s5cmd is faster on a multi-GB prefix, but it
+          # ships as a tarball and this image has no tar -- the download failed with
+          # "tar: command not found". The CLI is already here, and since the copy is
+          # identical in both variants that use it, its absolute speed does not
+          # affect the loader comparison this phase exists to make.
+          aws s3 cp "s3://@MODEL_BUCKET@/@MODEL_PREFIX@/" /models/ \
+            --recursive \
+            --only-show-errors
+          echo "download end   $(date -u +%FT%TZ)"
+          du -sh /models
+      env:
+        - name: AWS_REGION
+          value: "@REGION@"
+        - name: AWS_DEFAULT_REGION
+          value: "@REGION@"
+        # Default is 10; raising it uses the available bandwidth on a large prefix.
+        - name: AWS_MAX_CONCURRENT_REQUESTS
+          value: "32"
+      volumeMounts:
+        - name: models
+          mountPath: /models

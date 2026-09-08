@@ -1,0 +1,77 @@
+################################################################################
+# Arm D -- EKS Auto Mode, nothing configured
+#
+# Compare this file to arm C. There is no userData, no snapshotter setting, no
+# instanceStorePolicy, no block device mapping. On a GPU instance with local
+# NVMe, Auto Mode formats the NVMe (RAID 0 across multiple drives), puts
+# ephemeral container storage on it, and pulls and unpacks images in parallel.
+# That is the whole of arm C's configuration, done by the service.
+#
+# Two things this arm cannot do, and both belong on the record:
+#
+#   1. There is no snapshotID. Auto Mode's NodeClass exposes ephemeralStorage as
+#      size / iops / throughput / kmsKeyID only, so arm B's mechanism is not
+#      available here. If pre-baked images are the answer for a given workload,
+#      that workload does not go on Auto Mode.
+#   2. The SOCI tuning knobs from arm C are not exposed. You get the service's
+#      defaults.
+#
+# ephemeralStorage.size is deliberately left below the instance's NVMe capacity.
+# Per the Auto Mode docs, that is the trigger for Auto Mode to attach a small
+# 20 GiB EBS volume and put ephemeral data on the NVMe instead. Set it at or
+# above NVMe capacity and Auto Mode skips the EBS volume and hands the NVMe
+# straight to the workload -- which is not what we want to measure.
+#
+# @NODE_IAM_ROLE@ is substituted by bin/prep.sh, read from the built-in default
+# NodeClass since that one is read-only.
+################################################################################
+apiVersion: eks.amazonaws.com/v1
+kind: NodeClass
+metadata:
+  name: arm-d-automode
+spec:
+  role: "@NODE_IAM_ROLE@"
+  ephemeralStorage:
+    size: "80Gi"
+  subnetSelectorTerms:
+    - tags:
+        kubernetes.io/role/internal-elb: "1"
+  securityGroupSelectorTerms:
+    - tags:
+        aws:eks:cluster-name: "@CLUSTER_NAME@"
+  tags:
+    workshop-arm: arm-d-automode
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: arm-d-automode
+spec:
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30m
+  limits:
+    nvidia.com/gpu: "4"
+  template:
+    metadata:
+      labels:
+        workshop-arm: arm-d-automode
+    spec:
+      nodeClassRef:
+        group: eks.amazonaws.com
+        kind: NodeClass
+        name: arm-d-automode
+      taints:
+        - key: nvidia.com/gpu
+          effect: NoSchedule
+      expireAfter: 4h
+      requirements:
+        - key: eks.amazonaws.com/instance-family
+          operator: In
+          values: ["@GPU_INSTANCE_FAMILY@"]
+        - key: eks.amazonaws.com/instance-size
+          operator: In
+          values: ["@GPU_INSTANCE_SIZE@"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]

@@ -1,0 +1,107 @@
+################################################################################
+# Arm C -- local NVMe + SOCI snapshotter in parallel pull/unpack mode
+#
+# Two changes from arm A, and they work together:
+#
+#   instanceStorePolicy: RAID0
+#     Karpenter builds a RAID0 array from the instance's NVMe disks and moves
+#     /var/lib/containerd, /var/lib/kubelet, /var/log/pods and SOCI's data dir
+#     (/var/lib/soci-snapshotter on Bottlerocket) onto it. SOCI buffers layers on
+#     disk while downloading, so the storage subsystem has to keep up.
+#
+#   userData
+#     Switches the snapshotter to SOCI and turns on parallel pull/unpack. SOCI
+#     opens several HTTP connections per layer and unpacks multiple layers at
+#     once, turning an I/O-bound sequential pull into a CPU-parallel one. The
+#     image is unmodified -- no index to build, no pipeline change.
+#
+# Requires Bottlerocket >= 1.44.0. The bottlerocket@latest alias is well past
+# that; bin/prep.sh asserts it anyway.
+#
+# The tuning values below are the ones AWS publishes in the Karpenter blueprint.
+# They are a starting point, not a recommendation for your images --
+# working out the right numbers for your layer count and vCPU is section 5.
+################################################################################
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: arm-c-soci
+spec:
+  amiSelectorTerms:
+    - alias: bottlerocket@latest
+  role: "@KARPENTER_NODE_IAM_ROLE_NAME@"
+  instanceStorePolicy: RAID0
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 4Gi
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+    # Still provisioned like arm A. With RAID0 in play containerd is on NVMe, so
+    # this volume is mostly idle -- keeping it identical removes it as a variable.
+    - deviceName: /dev/xvdb
+      ebs:
+        volumeSize: 100Gi
+        volumeType: gp3
+        throughput: 1000
+        iops: 16000
+        encrypted: true
+        deleteOnTermination: true
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "@CLUSTER_NAME@"
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "@CLUSTER_NAME@"
+  tags:
+    workshop-arm: arm-c-soci
+  userData: |
+    [settings.container-runtime]
+    snapshotter = "soci"
+
+    [settings.container-runtime-plugins.soci-snapshotter]
+    pull-mode = "parallel-pull-unpack"
+
+    [settings.container-runtime-plugins.soci-snapshotter.parallel-pull-unpack]
+    max-concurrent-downloads-per-image = 20
+    concurrent-download-chunk-size = "16mb"
+    max-concurrent-unpacks-per-image = 12
+    discard-unpacked-layers = true
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: arm-c-soci
+spec:
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 30m
+  limits:
+    nvidia.com/gpu: "4"
+  template:
+    metadata:
+      labels:
+        workshop-arm: arm-c-soci
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: arm-c-soci
+      taints:
+        - key: nvidia.com/gpu
+          effect: NoSchedule
+      expireAfter: 4h
+      requirements:
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["@GPU_INSTANCE_TYPE@"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
