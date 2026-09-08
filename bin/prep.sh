@@ -144,8 +144,8 @@ kubectl --context "${AUTOMODE_CLUSTER}" create namespace bench \
 ################################################################################
 echo "==> Run:ai streaming support (phase 2)"
 echo "    not checked here. Confirming it means pulling a ~9 GB image, which takes"
-echo "    minutes, and a check that times out reports a false negative -- worse than"
-echo "    no check. Run it against a node that already has the image:"
+echo "    minutes. A check that times out reports a false negative, so it is run"
+echo "    separately against a node that already has the image:"
 echo "        bin/bench.sh arm-c-soci      # warms the node"
 echo "        bin/check_runai.sh"
 echo "    Phase 2 will also fail loudly and immediately if it is missing."

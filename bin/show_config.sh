@@ -4,10 +4,9 @@
 #
 #   bin/show_config.sh arm-b-snapshot
 #
-# Exists because a timing number on its own does not teach anyone anything. A
-# participant needs to see the field, the resource it goes in, and why it is there --
-# otherwise the workshop demonstrates that a mechanism works without showing how to
-# use it.
+# A timing figure on its own does not show how the result was produced. This prints
+# the field, the resource it belongs to, and the reason for it, so a participant can
+# apply the same configuration themselves.
 #
 # The diff is taken against the baseline arm and comments are stripped, so what
 # prints is only the configuration that actually differs. It reads the real rendered
@@ -42,8 +41,8 @@ plain()   { printf '  %s\n' "$1"; }
 strip() { grep -vE '^\s*#|^\s*$' "$1"; }
 
 # Drop lines that differ only because the arm is called something else -- resource
-# names, labels, tags. Without this the rename noise buries the one or two lines
-# that are the actual lesson, which defeats the purpose of showing a diff at all.
+# names, labels, tags. Without this filter those lines outnumber the one or two
+# lines of configuration that actually differ.
 drop_identity() {
   grep -vE 'arm-a-baseline|arm-b-snapshot|arm-c-soci|arm-d-automode'
 }
@@ -72,18 +71,18 @@ case "${ARM}" in
   arm-a-baseline)
     heading "Arm A -- the baseline. Nothing is configured."
     plain ""
-    why "This is Bottlerocket exactly as it ships. Two EBS volumes: a small control"
+    why "Bottlerocket with its default settings. Two EBS volumes: a small control"
     why "volume, and a data volume that holds container images and logs. containerd"
     why "pulls layers one at a time with its default snapshotter."
     plain ""
-    plain "The only thing worth pointing at is the shape of the node class:"
+    plain "The node class is worth reading because the later arms modify it:"
     plain ""
     grep -A12 'blockDeviceMappings:' "${BASE}" 2>/dev/null | grep -vE '^\s*#' | sed 's/^/    /'
     plain ""
     why "deviceName /dev/xvda -> Bottlerocket's control volume (OS)"
     why "deviceName /dev/xvdb -> the data volume: container images live here"
     plain ""
-    plain "Everything the other arms do is a change to how that second volume is used."
+    plain "The other arms change how that second volume is used."
     ;;
 
   arm-b-snapshot)
@@ -94,15 +93,15 @@ case "${ARM}" in
     plain "    Restores the data volume from an EBS snapshot that already contains the"
     plain "    image layers. containerd finds them locally, so there is nothing to pull."
     plain ""
-    why "encrypted: true disappears, and that is not a downgrade"
+    why "encrypted: true is not set here"
     plain "    A volume restored from a snapshot inherits the snapshot's encryption."
-    plain "    The snapshot came from arm A's encrypted volume, so this one is encrypted"
-    plain "    too. Setting the flag as well is allowed but redundant."
+    plain "    The snapshot came from arm A's encrypted volume, so this volume is"
+    plain "    encrypted. Setting the field as well has no additional effect."
     plain ""
     warn "Note what is NOT here: instanceStorePolicy."
-    plain "    That is the whole point of the exclusivity. Arm B needs the images on the"
-    plain "    volume restored from the snapshot. Adding instanceStorePolicy would move"
-    plain "    container storage to local NVMe and the snapshot would be bypassed."
+    plain "    Arm B needs the images on the volume restored from the snapshot. Adding"
+    plain "    instanceStorePolicy moves container storage to local NVMe, and the"
+    plain "    restored volume is then unused."
     plain ""
     plain "  Where the snapshot comes from:"
     plain "    bin/bench.sh arm-a-baseline        # leaves a node with the image pulled"
@@ -117,23 +116,23 @@ case "${ARM}" in
 
   arm-c-soci)
     show_diff "${BASE}" "${RENDERED}/12-arm-c-soci.yaml" \
-      "Arm C -- two changes, and they work together"
+      "Arm C -- two additions"
     plain ""
     why "instanceStorePolicy: RAID0"
     plain "    Karpenter builds a RAID0 array from the instance's NVMe disks and moves"
     plain "    /var/lib/containerd, /var/lib/kubelet, /var/log/pods and SOCI's data"
     plain "    directory onto it. Without this, SOCI still works but buffers layers on"
-    plain "    EBS while downloading, which becomes the limit."
+    plain "    EBS while downloading, and the EBS throughput then limits the result."
     plain ""
-    why "userData -- Bottlerocket settings in TOML, not shell"
+    why "userData -- Bottlerocket reads TOML settings here, not a shell script"
     plain "    snapshotter = \"soci\"            switches containerd's snapshotter"
-    plain "    pull-mode = \"parallel-pull-unpack\"   the mode that does the work"
+    plain "    pull-mode = \"parallel-pull-unpack\"   selects the parallel mode"
     plain "    max-concurrent-downloads-per-image   HTTP connections per layer"
     plain "    max-concurrent-unpacks-per-image     layers decompressed at once"
     plain ""
-    warn "Requires Bottlerocket >= 1.44.0. Below that the snapshotter setting is"
-    warn "silently ignored -- the node boots, the pod runs, and the arm quietly"
-    warn "measures the same thing as arm A. bin/prep.sh asserts the version."
+    warn "Requires Bottlerocket >= 1.44.0. On an earlier version the snapshotter"
+    warn "setting is ignored without an error: the node boots, the pod runs, and"
+    warn "this arm measures the same thing as arm A. bin/prep.sh checks the version."
     plain ""
     plain "  The image is unmodified. No SOCI index to build, no registry change,"
     plain "  no build-pipeline change."
@@ -141,22 +140,21 @@ case "${ARM}" in
 
   arm-d-automode)
     show_diff "${RENDERED}/12-arm-c-soci.yaml" "${RENDERED}/13-arm-d-automode.yaml" \
-      "Arm D -- against arm C. Count what is absent."
+      "Arm D -- compared with arm C"
     plain ""
-    why "Gone: instanceStorePolicy, the userData block, blockDeviceMappings."
+    why "Absent: instanceStorePolicy, the userData block, blockDeviceMappings."
     plain "    On a GPU instance with local NVMe, EKS Auto Mode formats the NVMe, puts"
-    plain "    container storage on it, and pulls and unpacks in parallel. That is arm"
-    plain "    C's configuration, done by the service."
+    plain "    container storage on it, and pulls and unpacks in parallel."
     plain ""
-    why "ephemeralStorage.size is deliberately BELOW the instance's NVMe capacity."
-    plain "    Per the Auto Mode docs that is the trigger: Auto Mode attaches a small"
-    plain "    20 GiB EBS volume and puts ephemeral data on the NVMe. Set it at or above"
-    plain "    NVMe capacity and Auto Mode hands the NVMe to the workload instead."
+    why "ephemeralStorage.size is below the instance's NVMe capacity."
+    plain "    Per the Auto Mode docs, a value below NVMe capacity causes Auto Mode to"
+    plain "    attach a 20 GiB EBS volume and put ephemeral data on the NVMe. A value at"
+    plain "    or above NVMe capacity makes the NVMe available to the workload instead."
     plain ""
     warn "Two things Auto Mode cannot do:"
     warn "  1. No snapshotID. ephemeralStorage is size/iops/throughput/kmsKeyID only,"
     warn "     so arm B's mechanism is unavailable here."
-    warn "  2. The SOCI tuning knobs are not exposed. You get the service defaults."
+    warn "  2. The SOCI settings are not exposed. The service defaults apply."
     plain ""
     plain "  Also note the API group differs: eks.amazonaws.com/v1 NodeClass, not"
     plain "  karpenter.k8s.aws/v1 EC2NodeClass. Different controller, same NodePool CRD."
@@ -183,14 +181,15 @@ case "${ARM}" in
     plain "                     --load-format runai_streamer \\"
     plain "                     --model-loader-extra-config '{\"concurrency\":${RUNAI_CONCURRENCY_S3}}'"
     plain ""
-    plain "  1 -> 2 changes only the loader. 2 -> 3 changes only the delivery."
-    plain "  Reported separately so one effect is not credited to the other."
+    plain "  1 to 2 changes the loader only. 2 to 3 changes the delivery only."
+    plain "  Reported separately to show which change affected the total."
     plain ""
     why "Credentials: serviceAccountName: bench, bound to an IAM role by EKS Pod"
     why "Identity in terraform/main.tf."
     warn "  Not the node role. Karpenter sets the IMDS hop limit to 1, so a container"
-    warn "  cannot reach instance metadata at all and the AWS SDK reports"
-    warn "  'Unable to locate credentials'. That default is correct -- keep it."
+    warn "  cannot reach instance metadata and the AWS SDK reports"
+    warn "  'Unable to locate credentials'. The hop limit prevents pods from using"
+    warn "  node permissions, so it is left as it is."
     plain ""
     plain "  runai-streamer already ships in the AWS vLLM DLC base image:"
     plain "    bin/check_runai.sh"

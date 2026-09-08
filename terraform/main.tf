@@ -9,13 +9,12 @@
 #                       the image mechanism.
 #
 #   <prefix>-automode   EKS Auto Mode. Carries arm D. Auto Mode configures NVMe
-#                       and parallel image pull on GPU instances with no
-#                       configuration, which is the point of the comparison.
+#                       and parallel image pull on GPU instances without being
+#                       configured to.
 #
 # Two clusters rather than one because self-managed Karpenter and Auto Mode both
-# own the karpenter.sh CRDs, and reconciling that during a live session is not
-# worth the time. They share the VPC and subnets so the pull path is identical
-# and the numbers stay comparable.
+# own the karpenter.sh CRDs. They share the VPC and subnets, so the image pull path
+# is the same in both and the figures remain comparable.
 ################################################################################
 
 provider "aws" {

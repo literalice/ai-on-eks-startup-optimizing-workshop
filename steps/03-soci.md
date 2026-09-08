@@ -1,36 +1,36 @@
 # Step 3 — Local NVMe and the SOCI snapshotter
 # ステップ 3 — ローカル NVMe と SOCI snapshotter
 
-**Goal / 目的:** make the pull itself faster, with the image unmodified and no
-per-image pre-work.
+**Goal / 目的:** reduce the pull duration without modifying the image and without
+per-image preparation.
 
-イメージを無改変・イメージ単位の事前作業なしで、pull 自体を速くします。
+イメージを変更せず、イメージ単位の準備も行わずに、pull の所要時間を短縮します。
 
 ---
 
-## The idea / 考え方
+## How it works / 仕組み
 
-containerd's default snapshotter downloads and unpacks layers **one at a time**.
-The [SOCI snapshotter][soci] in *parallel pull/unpack* mode opens several HTTP
-connections per layer and decompresses several layers concurrently. It needs
-somewhere fast to buffer, which is what the local NVMe is for.
+containerd's default snapshotter downloads and unpacks layers one at a time. The
+[SOCI snapshotter][soci] in parallel pull/unpack mode opens several HTTP connections
+per layer and decompresses several layers concurrently. It buffers layers on disk while
+downloading, which is why local NVMe is used.
 
-containerd の既定 snapshotter はレイヤを**1 つずつ**ダウンロード・展開します。
-[SOCI snapshotter][soci] の *parallel pull/unpack* モードは、レイヤごとに複数の HTTP
-接続を開き、複数レイヤを同時に展開します。バッファ用に高速な領域が必要で、そのために
+containerd の既定 snapshotter はレイヤを 1 つずつダウンロード・展開します。
+[SOCI snapshotter][soci] の parallel pull/unpack モードは、レイヤごとに複数の HTTP 接続を
+開き、複数のレイヤを同時に展開します。ダウンロード中にレイヤをディスクにバッファするため、
 ローカル NVMe を使います。
 
-**No SOCI index is built. The image is not modified. Your build pipeline does not
-change.**
+No SOCI index is created, the image is not modified, and the build pipeline does not
+change.
 
-**SOCI index の作成は不要。イメージは無改変。ビルドパイプラインも変更なしです。**
+SOCI index の作成は不要で、イメージは変更せず、ビルドパイプラインも変わりません。
 
 ---
 
 ## The configuration change / 設定変更
 
-Two additions to the node class
-([`12-arm-c-soci.yaml`](../manifests/karpenter/12-arm-c-soci.yaml)):
+Two additions to the node class, in
+[`12-arm-c-soci.yaml`](../manifests/karpenter/12-arm-c-soci.yaml):
 
 node class への追加は 2 箇所です。
 
@@ -44,7 +44,7 @@ spec:
     - alias: bottlerocket@latest
   role: "<node IAM role>"
 
-  instanceStorePolicy: RAID0                 # <-- CHANGE 1
+  instanceStorePolicy: RAID0                 # addition 1
 
   blockDeviceMappings:
     - deviceName: /dev/xvda
@@ -52,7 +52,7 @@ spec:
     - deviceName: /dev/xvdb
       ebs: { volumeSize: 100Gi, volumeType: gp3, throughput: 1000, iops: 16000, encrypted: true }
 
-  userData: |                                # <-- CHANGE 2 (Bottlerocket TOML)
+  userData: |                                # addition 2 (Bottlerocket TOML)
     [settings.container-runtime]
     snapshotter = "soci"
 
@@ -66,58 +66,57 @@ spec:
     discard-unpacked-layers = true
 ```
 
-### Change 1 — `instanceStorePolicy: RAID0`
+### Addition 1 — `instanceStorePolicy: RAID0`
 
-Karpenter builds a RAID0 array from the instance's NVMe disks and moves
+Karpenter creates a RAID0 array from the instance's NVMe disks and moves
 `/var/lib/containerd`, `/var/lib/kubelet`, `/var/log/pods` and SOCI's data directory
-(`/var/lib/soci-snapshotter` on Bottlerocket) onto it, symlinking them back.
+(`/var/lib/soci-snapshotter` on Bottlerocket) onto it, leaving symlinks in the original
+locations.
 
-Karpenter がインスタンスの NVMe から RAID0 を構成し、`/var/lib/containerd`、
-`/var/lib/kubelet`、`/var/log/pods`、SOCI のデータディレクトリを移して symlink します。
+Karpenter がインスタンスの NVMe ディスクから RAID0 を構成し、`/var/lib/containerd`、
+`/var/lib/kubelet`、`/var/log/pods`、SOCI のデータディレクトリを移動して、元の場所には
+symlink を残します。
 
-**Why it is needed:** SOCI buffers layers on disk while downloading. Without this,
-that buffering happens on EBS and becomes the limit — you would enable parallelism
-and then throttle it.
+SOCI buffers layers on disk while downloading. Without this setting the buffering
+happens on the EBS volume, and the EBS volume's throughput then limits the result.
 
-**必要な理由:** SOCI はダウンロード中にレイヤをディスクへバッファします。これが無いと
-バッファ先が EBS になり、それが律速します。並列化しておいて自ら絞ることになります。
+SOCI はダウンロード中にレイヤをディスクにバッファします。この設定が無い場合、バッファ先は
+EBS ボリュームになり、EBS のスループットが結果を制限します。
 
-### Change 2 — `userData`
+### Addition 2 — `userData`
 
-Bottlerocket takes **TOML settings, not a shell script**. This is the most common
-thing people get wrong when coming from AL2023.
+Bottlerocket reads TOML settings from `userData`, not a shell script. This differs from
+Amazon Linux 2023, where `userData` contains a `NodeConfig` document or a script.
 
-Bottlerocket が受け取るのは**シェルスクリプトではなく TOML 設定**です。AL2023 から
-来た人が最もよく間違える点です。
+Bottlerocket は `userData` からシェルスクリプトではなく TOML 設定を読みます。この点は、
+`userData` に `NodeConfig` やスクリプトを書く Amazon Linux 2023 とは異なります。
 
-| Setting | What it does / 役割 |
+| Setting | Effect / 効果 |
 |---|---|
-| `snapshotter = "soci"` | Switches containerd's snapshotter. Without this, everything below is inert.<br>containerd の snapshotter を切り替えます。これが無いと以下はすべて無効です。 |
-| `pull-mode = "parallel-pull-unpack"` | Selects the mode that parallelises. SOCI also has lazy-loading modes; this is not one of them.<br>並列化するモードを選びます。SOCI には lazy-load 系もありますが、これはそれではありません。 |
-| `max-concurrent-downloads-per-image = 20` | HTTP connections per layer. Uses bandwidth a single connection cannot.<br>レイヤあたりの HTTP 接続数。単一接続では使えない帯域を使います。 |
-| `concurrent-download-chunk-size = "16mb"` | How large layers are split for parallel fetch.<br>並列取得のためにレイヤを分割する単位。 |
-| `max-concurrent-unpacks-per-image = 12` | Layers decompressed at once. **CPU-bound** — this is why vCPU count changes the result.<br>同時展開レイヤ数。**CPU バウンド**であり、vCPU 数が結果を変える理由です。 |
-| `discard-unpacked-layers = true` | Frees the compressed copy after unpacking, saving disk.<br>展開後に圧縮コピーを破棄しディスクを節約します。 |
+| `snapshotter = "soci"` | Selects SOCI as containerd's snapshotter. Without this line the settings below have no effect.<br>containerd の snapshotter として SOCI を選択します。この行が無いと以下の設定は効きません。 |
+| `pull-mode = "parallel-pull-unpack"` | Selects the parallel mode. SOCI also has lazy-loading modes, which this is not.<br>並列モードを選択します。SOCI には lazy-load 系のモードもありますが、これはそれではありません。 |
+| `max-concurrent-downloads-per-image = 20` | Number of HTTP connections per layer.<br>レイヤあたりの HTTP 接続数。 |
+| `concurrent-download-chunk-size = "16mb"` | Size that large layers are split into for parallel download.<br>並列ダウンロードのためにレイヤを分割する単位。 |
+| `max-concurrent-unpacks-per-image = 12` | Number of layers decompressed at the same time. Decompression is CPU-bound, which is why the instance's vCPU count affects the result.<br>同時に展開するレイヤ数。展開は CPU バウンドなので、インスタンスの vCPU 数が結果に影響します。 |
+| `discard-unpacked-layers = true` | Frees the compressed copy of each layer after unpacking.<br>展開後に各レイヤの圧縮コピーを解放します。 |
 
-> **These values are AWS's published starting point, not a recommendation for your
-> images.** Layer count, layer size and vCPU all move the right answer. Tuning them
-> against your own images is part of step 6.
->
-> **これらの値は AWS が公開する出発点であり、あなたのイメージ向けの推奨値ではありません。**
-> レイヤ数・サイズ・vCPU で最適値は変わります。自分のイメージでの調整はステップ 6 の一部です。
+These values are the ones AWS publishes as a starting point. Layer count, layer size
+and vCPU affect which values are appropriate for a given image.
 
-### The version requirement / バージョン要件
+これらは AWS が出発点として公開している値です。適切な値はレイヤ数、レイヤサイズ、vCPU に
+よって変わります。
 
-> **Bottlerocket >= 1.44.0 is mandatory.** SOCI parallel pull/unpack landed there.
-> On anything older, `snapshotter = "soci"` is **silently ignored** — the node boots,
-> the pod runs, and this arm quietly measures the same thing as step 1. That reads as
-> "SOCI does not help", which is the wrong conclusion to take away.
-> `bin/prep.sh` asserts the version for exactly this reason.
->
-> **Bottlerocket 1.44.0 以上が必須です。** parallel pull/unpack はそこで入りました。
-> それより古いと `snapshotter = "soci"` は**黙って無視され**、ノードは起動し Pod も動き、
-> この arm はステップ 1 と同じものを計測します。結果は「SOCI は効かない」と読めますが、
-> それは誤った結論です。`bin/prep.sh` がこのために検証します。
+### Version requirement / バージョン要件
+
+SOCI parallel pull/unpack was added in Bottlerocket 1.44.0. On an earlier version,
+`snapshotter = "soci"` is ignored without an error: the node boots, the pod runs, and
+this arm measures the same thing as step 1. The resulting figures would suggest SOCI
+has no effect. `bin/prep.sh` checks the version before the arms run.
+
+SOCI の parallel pull/unpack は Bottlerocket 1.44.0 で追加されました。それより前の
+バージョンでは `snapshotter = "soci"` がエラーなしで無視され、ノードは起動し Pod も動き、
+この arm はステップ 1 と同じものを計測します。その結果の数字は SOCI に効果がないように
+見えます。`bin/prep.sh` は arm の実行前にバージョンを確認します。
 
 ---
 
@@ -125,7 +124,7 @@ Bottlerocket が受け取るのは**シェルスクリプトではなく TOML �
 
 ```bash
 bin/prep.sh
-bin/show_config.sh arm-c-soci     # shows both changes as a diff against step 1
+bin/show_config.sh arm-c-soci     # shows both additions as a diff against step 1
 bin/bench.sh arm-c-soci
 ```
 
@@ -137,44 +136,45 @@ bin/bench.sh arm-c-soci
 bin/verify_config.sh arm-c-soci
 ```
 
-Three checks, and note honestly what each does and does not prove:
+Three checks, with their limits stated:
 
-3 つの確認です。それぞれが何を証明し、何を証明しないかを正直に押さえてください。
+確認は 3 つで、それぞれ確認できる範囲も示されます。
 
-1. **Container storage moved to NVMe.** The node's ephemeral-storage capacity now
-   reflects the NVMe array rather than the 100 GiB EBS volume. Proves change 1 took
-   effect.
-   **コンテナストレージが NVMe に移ったか。** ノードの ephemeral-storage 容量が
-   100 GiB の EBS ではなく NVMe を反映します。変更 1 が効いた証明です。
-2. **The settings reached the node.** It reads `userData` back off the applied
-   `EC2NodeClass`. This proves the settings were **delivered** — it does not prove
-   SOCI ran, because Bottlerocket has no shell to check from.
-   **設定がノードに届いたか。** 適用済み `EC2NodeClass` の `userData` を読み戻します。
-   これは**配送**の証明で、SOCI が動いた証明ではありません。Bottlerocket にシェルが
-   無いため確認できません。
-3. **The Bottlerocket version is >= 1.44.0.**
-   **Bottlerocket が 1.44.0 以上か。**
+1. Container storage moved to NVMe. The node's ephemeral-storage capacity corresponds
+   to the NVMe array rather than the 100 GiB EBS volume. This confirms addition 1.
+   コンテナストレージが NVMe に移ったか。ノードの ephemeral-storage 容量が、100 GiB の
+   EBS ボリュームではなく NVMe アレイに対応します。追加 1 の確認になります。
+2. The settings reached the node. The script reads `userData` back from the applied
+   `EC2NodeClass`. This confirms the settings were delivered. It does not confirm that
+   SOCI ran, because Bottlerocket does not provide a shell for checking the running
+   configuration.
+   設定がノードに届いたか。適用済み `EC2NodeClass` の `userData` を読み戻します。設定が
+   配送されたことの確認です。SOCI が動作したことの確認にはなりません。Bottlerocket は
+   稼働中の設定を確認するためのシェルを提供していないためです。
+3. The Bottlerocket version is 1.44.0 or later.
+   Bottlerocket が 1.44.0 以降か。
 
-**The behavioural evidence is the throughput figure.** If SOCI were being ignored,
-this arm would land on step 1's MB/s. It does not — that is the check that matters.
+The throughput figure indicates whether SOCI ran. If the setting were being ignored,
+this arm's throughput would match step 1's.
 
-**挙動としての証拠はスループットの数字です。** SOCI が無視されていれば、この arm は
-ステップ 1 と同じ MB/s になります。そうならないことが本質的な確認です。
+SOCI が動作したかはスループットの数字から判断できます。設定が無視されていれば、この arm の
+スループットはステップ 1 と同じ値になります。
 
 ---
 
-## What you should conclude / ここで得る結論
+## What the figures show / 数字から分かること
 
-- **The pull roughly halved** on an unmodified image, with no per-image pre-work
-  and no build-pipeline change. In the reference run 95s → 62s, 98 → 151 MB/s.
-  **pull はおよそ半減しました。** イメージ無改変、イメージ単位の事前作業なし、ビルド
-  パイプライン変更なし。参考計測では 95→62 秒、98→151 MB/s。
-- **This is the honest comparison in the whole workshop:** step 1 versus step 3.
-  Same provisioner, same OS, same instance type, one mechanism changed.
-  **本ワークショップで最も厳密な比較がこれです。** ステップ 1 対 3。プロビジョナ・OS・
-  インスタンスタイプが同一で、変えたのは 1 方式だけです。
-- **It is mutually exclusive with step 2.** You are choosing, not stacking.
-  **ステップ 2 とは排他です。** 積み上げるのではなく選ぶ関係です。
+- The pull dropped from 95 seconds to 62 seconds in the reference run, and throughput
+  rose from 98 MB/s to 151 MB/s. The image was not modified and no per-image
+  preparation was needed.
+  参考計測では pull が 95 秒から 62 秒になり、スループットは 98 MB/s から 151 MB/s に
+  なりました。イメージは変更せず、イメージ単位の準備も不要です。
+- Step 1 and step 3 differ by one mechanism, with the same provisioner, OS and instance
+  type, so the difference is attributable to that mechanism.
+  ステップ 1 と 3 は、プロビジョナ・OS・インスタンスタイプが同じで、異なるのは 1 つの
+  方式だけです。差はその方式に帰属できます。
+- This arm and step 2 cannot both be applied to the same node.
+  この arm とステップ 2 は同じノードに併用できません。
 
 ---
 

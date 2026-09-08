@@ -83,7 +83,7 @@ title "Bottlerocket startup-time workshop"
 
 say "The problem we are here to solve: GPU inference pods take too long to become ready. Rather than assume where the time goes, we are going to measure it, and then measure three different ways of making it shorter."
 
-say "One thing to say at the start. The image and instance type here are ours, not yours, so the absolute numbers will not match what you see. What transfers is the shape -- which stage dominates, and what each mechanism does to it. Your own numbers come from running these same steps in your account."
+say "One point at the start. The image and instance type here are ours, so the absolute figures will differ from yours. What can be compared is which stage accounts for most of the time, and how each mechanism changes it. Your own figures come from running these steps in your account."
 
 say "Four arms. Same pod spec, same instance type, same VPC and subnets, same container image. The only thing that differs between them is how the container image reaches the node."
 
@@ -95,7 +95,7 @@ cat <<'ARMS'
 ARMS
 sleep "${BEAT}"
 
-say "Two things worth saying before any numbers appear. B and C are mutually exclusive -- they compete for the same volume, so you pick one. And D cannot do B's mechanism at all, because Auto Mode's NodeClass has no snapshotID field."
+say "Two constraints before any figures appear. Arms B and C cannot both be applied to the same node, because both govern the volume Bottlerocket uses for container images. And arm B's mechanism is not available on Auto Mode, because its NodeClass has no snapshotID field."
 
 note "Every run below starts cold: the arm's node is deleted first, so nothing is cached."
 note "Stages are computed from timestamps Kubernetes already records, so they sum to the total exactly. No time is unattributed."
@@ -108,35 +108,35 @@ say "Two clusters, one shared VPC. Self-managed Karpenter carries arms A, B and 
 run kubectl --context "${KARPENTER_CLUSTER}" get nodes -o wide
 run kubectl --context "${AUTOMODE_CLUSTER}" get nodes -o wide
 
-say "Note what is not installed anywhere in either cluster: an NVIDIA device plugin. The Bottlerocket NVIDIA AMI already contains the driver, the container toolkit and the device plugin. Our readiness probe runs nvidia-smi inside the container, so Ready proves the GPU is genuinely usable."
+say "No NVIDIA device plugin is installed in either cluster. The Bottlerocket NVIDIA AMI contains the driver, the container toolkit and the device plugin. The readiness probe runs nvidia-smi inside the container, so a pod reaching Ready means the GPU is available to the container."
 
 run kubectl --context "${KARPENTER_CLUSTER}" get nodepools
 
 ################################################################################
 if [[ "${QUICK}" == false ]]; then
-  title "Item 1 -- where the time actually goes"
+  title "Step 1 -- where the time goes"
 
   say "Arm A first: Bottlerocket exactly as it ships. This is the number everything else is measured against. Watch the step timings appear as each step completes."
 
-  say "The interesting moment is coming up. The provisioning steps will scroll past quickly, and then one line will sit there on its own for a while. That line is the whole point of this workshop."
+  say "The provisioning steps will print quickly. The output then stops after the image pull starts, and resumes when the pull finishes. That interval is what this workshop measures."
 
-  say "Before the number, the configuration. This is the baseline, so there is nothing configured -- but look at the shape of the node class, because everything the other arms do is a change to it."
+  say "The configuration first. This is the baseline, so nothing is configured. The node class is still worth reading, because the later arms modify it."
 
   run "${HERE}/show_config.sh" arm-a-baseline
 
   run "${HERE}/bench.sh" arm-a-baseline
 
-  say "Now prove it really was a clean baseline -- no userData, no instanceStorePolicy, no snapshotID, and container storage on EBS rather than NVMe. That is what makes every later gain attributable to what that arm added."
+  say "Now the check that this was a clean baseline: no userData, no instanceStorePolicy, no snapshotID, and container storage on EBS rather than NVMe. With those confirmed, an improvement in a later arm can be attributed to what that arm added."
 
   run "${HERE}/verify_config.sh" arm-a-baseline
 
-  say "There it is. The node was ready in about half a minute. The image pull then took roughly three times as long as everything else put together. That matters because it means the fix is not in how you provision nodes -- it is in how the image gets to them."
+  say "The node was ready in about half a minute. The image pull took roughly three times as long as all the other stages combined. So the difference between the arms will come from how the image reaches the node, rather than from how the node is provisioned."
 
-  note "Look at the effective throughput line, and compare it to what this instance's network can actually do. It is not close."
+  note "Compare the effective throughput line with the instance's network bandwidth of up to 25 Gbps. The pull was not limited by the network."
 fi
 
 ################################################################################
-title "Item 2 -- two ways to deal with the image, and you only get one"
+title "Step 2 and 3 -- two image mechanisms that cannot be combined"
 
 say "Arm B: the image layers were baked into an EBS snapshot ahead of time, and the node restores its data volume from that snapshot. There is nothing to pull, because the layers are already on the disk when the node boots."
 
@@ -146,13 +146,13 @@ run "${HERE}/show_config.sh" arm-b-snapshot
 
 run "${HERE}/bench.sh" arm-b-snapshot
 
-say "No pull stage at all -- kubelet reports the image as already present on the machine. It never contacted the registry."
+say "There is no pull stage. kubelet reports the image as already present on the machine, so the registry was not contacted."
 
-say "Now the proof, which does not depend on the timing at all. It reads the volume the node actually booted with and compares its snapshot ID to the one we built. Then it checks kubelet reported the image as already present."
+say "The next check does not use the timing figures. It reads the volume the node booted with and compares its snapshot ID with the one we built, then confirms kubelet reported the image as already present."
 
 run "${HERE}/verify_config.sh" arm-b-snapshot
 
-say "That speed has a price, and I would rather state it than have you find it. Building that snapshot took about fifteen minutes, and it has to be rebuilt every time the image changes. Hold that thought for the last section."
+say "Building that snapshot took three to five minutes, and it has to be rebuilt whenever the image changes. That is the figure to weigh against this improvement in the last section."
 
 say "Arm C now: instead of pre-baking, we move container storage onto the instance's local NVMe and switch the snapshotter to SOCI in parallel pull/unpack mode. SOCI opens several connections per layer and unpacks several layers at once. The image is completely unmodified -- no index to build, no change to your build pipeline."
 
@@ -166,12 +166,12 @@ say "The proof for arm C. Container storage moved to NVMe -- visible in the node
 
 run "${HERE}/verify_config.sh" arm-c-soci
 
-say "This is the honest comparison in the whole workshop: A against C. Same provisioner, same operating system, same instance type. One mechanism changed."
+say "Arms A and C differ by one mechanism, with the same provisioner, operating system and instance type. That makes the difference between them attributable to that mechanism."
 
-note "Compare the throughput figures for A and C. That difference is what parallelism bought."
+note "Compare the throughput figures for arms A and C. The difference is the effect of parallel pull and unpack."
 
 ################################################################################
-title "Item 3 -- what Auto Mode does without being asked"
+title "Step 4 -- what Auto Mode does without being configured"
 
 say "Before the numbers, look at the configuration. This is arm C's node class against arm D's. Count what is present on the left and absent on the right."
 
@@ -188,20 +188,20 @@ run "${HERE}/verify_config.sh" arm-d-automode
 say "Two things Auto Mode cannot do, and both belong on the record. There is no snapshotID on its NodeClass, so arm B's mechanism is unavailable -- if pre-baked images are the right answer for a workload, that workload does not go on Auto Mode. And the SOCI tuning knobs from arm C are not exposed; you get the service defaults."
 
 ################################################################################
-title "Cold first pod versus warm scale-out"
+title "Step 5 -- cold first pod versus warm scale-out"
 
 say "Everything so far measured the first pod onto a brand new node. Most scale-out events do not look like that. They land on a node that is already running, with the image already in its cache. Same arm, node kept this time."
 
 run "${HERE}/bench.sh" arm-c-soci --warm
 
-say "Almost all of the cold number was a once-per-node cost, not a once-per-pod cost. I am showing you this for one specific reason: it stops the snapshot being over-credited. A snapshot helps the cold pod and does nothing at all for the warm one."
+say "Almost all of the cold measurement was incurred once per node rather than once per pod. This matters for reading arm B: a snapshot affects the first pod on a node and does not affect this one."
 
-say "It also reframes the whole question. If most of your scale-out lands on nodes that are already running, then none of the three mechanisms we just measured is where your time goes, and the answer is capacity policy instead -- keeping nodes longer, or warming them before you need them."
+say "If most of your pods are scheduled onto nodes that are already running, the three mechanisms we just measured affect a small part of your total startup time. Node capacity policy would affect more of it: keeping nodes for longer, or provisioning them before they are needed."
 
 note "The question this raises for you: when pods scale out, what fraction land on new nodes versus existing ones?"
 
 ################################################################################
-title "Item 4 -- how the model weights reach GPU memory"
+title "Step 6 -- how the model weights reach GPU memory"
 
 say "Once the image stops being the bottleneck, the weights become the story. Three variants, same node, same model, same bytes. Only the loader differs -- and the effect splits into two separate things, which is why there are three and not two."
 
@@ -218,25 +218,25 @@ run "${HERE}/show_config.sh" weights
 
 run "${HERE}/bench.sh" weights s3-initcontainer
 
-say "Look at the breakdown under 'workload becomes Ready'. Those lines come from vLLM's own log, and they are the reason this section has three variants instead of two. Reading the weights is a fraction of a second. Compiling and warming the engine is tens of seconds. A faster loader can only touch the fraction of a second."
+say "The lines under workload becomes Ready come from vLLM's log. Reading the weights took a fraction of a second. Compiling and warming the engine took tens of seconds. A faster loader can only affect the first of those."
 
-say "Same copy, same disk, different loader. Run:ai Model Streamer is Apache-2.0 open source and already ships in the AWS vLLM deep learning container -- nothing to install, no licence to buy. Watch what it does to the total."
+say "The same copy on the same disk, with a different loader. Run:ai Model Streamer is Apache-2.0 licensed and is included in the AWS vLLM deep learning container, so there is nothing to install."
 
 run "${HERE}/bench.sh" weights runai-local
 
-say "Essentially nothing, and that is the useful result. At this model size the weights were never the bottleneck, so a faster way of reading them has nothing to win. Had we shown only a before and after total, we would have concluded the tool does not work. The vLLM timings show it was never given anything to do."
+say "The total did not change. At this model size reading the weights was already a small part of the startup time, so a faster way of reading them had little to affect. Without the vLLM timings, this result would show only that the total did not change, without indicating why."
 
-say "The third variant changes the delivery instead of the loader. vLLM points straight at an S3 URI, so the init container disappears completely -- and with it the copy step, which kubelet runs strictly before the workload image pull rather than alongside it."
+say "The third variant changes the delivery rather than the loader. vLLM reads from an S3 URI, so the init container is removed, and with it the copy step that kubelet runs before the workload image pull rather than alongside it."
 
 run "${HERE}/bench.sh" weights runai-s3
 
-say "That one does move. Note where the gain comes from: not from loading faster -- streaming from S3 is actually a little slower per tensor than reading local disk -- but from deleting a step. On a larger model the loader would matter too; at this size, only the delivery does."
+say "This one reduced the total. The model load time went up, because streaming from S3 is slower per tensor than reading local disk. The reduction comes from removing the copy step. At a larger model size the loader would account for more of the time."
 
 say "The proof for phase 2 -- which loader the pod actually started with, whether the model came from disk or straight from S3, and the timing breakdown from vLLM's own log."
 
 run "${HERE}/verify_config.sh" weights
 
-say "One more number in these runs: time to first token. Ready only means vLLM answers its health endpoint. It does not mean the server will produce a token promptly. Submit-to-first-token is the number a user would actually feel."
+say "These runs also measure time to first token. A pod reaching Ready means vLLM answers its health endpoint, which does not indicate how soon it produces a token. Submit to first token covers that."
 
 ################################################################################
 title "The readout"
@@ -248,7 +248,7 @@ run "${HERE}/report.py" "${RESULTS_DIR}"
 say "What this does not tell you, stated plainly. One run per arm, so treat anything under about ten percent as noise until it repeats. Arm B's snapshot build time is not in the table, and that is the cost that decides whether it is worth adopting. And arm D ran on a different control plane, so read it as indicative rather than like-for-like."
 
 ################################################################################
-title "Item 5 -- what to adopt"
+title "Section 5 -- what to adopt"
 
 cat <<'DECISION'
     Images change rarely, latency critical .... B, the snapshot
@@ -259,9 +259,9 @@ cat <<'DECISION'
 DECISION
 sleep "${BEAT}"
 
-say "Two questions decide most of this, and neither is a matter of opinion. How often do your images change -- that is the fork between B and C. And how much of your startup cost is once-per-node -- that is whether any of this is the right thing to optimise at all."
+say "Two measurements determine most of this choice. How often your images change, which decides between arms B and C. And how much of your startup time is incurred once per node, which decides whether any of these mechanisms affects most of it."
 
-say "Every configuration you just watched is written up step by step in the steps directory -- the exact YAML, which field goes where, why it is there, what breaks without it, and how to prove it worked. That is what you follow in your own account."
+say "Each configuration shown here is written up in the steps directory: the YAML, which field goes in which resource, the reason for it, what happens if it is missing, and how to check it took effect. Those are the documents to follow in your own account."
 
 run ls "${ROOT}/steps"
 

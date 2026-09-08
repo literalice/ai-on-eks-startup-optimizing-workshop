@@ -1,50 +1,43 @@
 # Facilitator Guide / ファシリテーターガイド
 
-For whoever runs this workshop in front of an audience. The [README](README.md) is
-the runbook you hand over; this is the part you keep.
+For the person running this workshop with an audience. The [README](README.md) is the
+document participants use; this one is for the facilitator.
 
-このワークショップを人前で実施する担当者向けです。[README](README.md) は参加者に渡す
-手順書で、こちらは実施側が持つものです。
+このワークショップを参加者向けに実施する担当者用の資料です。[README](README.md) は参加者が
+使うもので、こちらは実施側の資料です。
 
-**Format: Show and Follow.** You prepare and run everything in your own AWS
-account and share your screen. Participants then repeat the same steps in their own
-Dev account using the runbook, which is where *their* numbers come from. There is
-no Workshop Studio dependency and **participants do not need an account or GPU
-quota on the day** — worth saying in the first minute, so nobody's missing
-prerequisites derail the session.
+Format: the facilitator prepares and runs everything in their own AWS account and shares
+their screen. Participants then repeat the same steps in their own Dev account using the
+README and the `steps/` documents. Participants do not need an AWS account or GPU quota
+on the day. Stating this at the start avoids spending time on participants' missing
+prerequisites.
 
-**形式は Show and Follow です。** 実施側が自分の AWS アカウントで全て準備・実行し、
-画面共有します。参加者は後日、手順書を使って自分の Dev アカウントで同じ手順を再実行し、
-**そこで出る数字**が判断材料になります。Workshop Studio は不要で、**当日参加者側に
-アカウントや GPU クォータは不要**です。これは冒頭 1 分で明示してください。参加者側の
-前提不足で議論が止まるのを防げます。
+形式: 実施側が自分の AWS アカウントで準備・実行し、画面共有します。参加者は後日、README と
+`steps/` を使って自分の Dev アカウントで同じ手順を実行します。当日、参加者側に AWS
+アカウントや GPU クォータは必要ありません。この点を冒頭で伝えると、参加者側の前提不足に
+時間を取られずに進められます。
 
 ---
 
 ## 0. Before the day / 前日までに
 
-The single biggest determinant of whether the session goes well.
-
-当日の成否を最も左右する部分です。
-
-| # | Task / 作業 | Time | If skipped / 未了だと |
+| # | Task / 作業 | Time | If not done / 未実施の場合 |
 |---|---|---|---|
-| 1 | `terraform apply` — build both clusters<br>クラスター 2 面を作る | 25–30 min | 30 minutes gone on the day<br>当日 30 分消える |
-| 2 | `bin/bench.sh arm-a-baseline`, then `snapshot/snapshot-from-node.sh`<br>arm A 実行 → スナップショット作成 | 10 min | arm B cannot be demonstrated<br>arm B が実演できない |
-| 3 | `snapshot/stage-model.sh` — weights to S3<br>ウェイトを S3 へ | 5–10 min | phase 2 cannot run<br>フェーズ 2 が動かない |
-| 4 | `bin/prep.sh` — apply the arms<br>arm を適用 | 2 min | nothing runs<br>何も動かない |
-| 5 | **Run all four arms, the warm run, and all three phase-2 variants once**<br>**4 arm + warm + phase 2 の 3 通りを 1 回ずつ通す** | 40–50 min | first-time execution on the day will bite<br>当日初回実行は事故る |
-| 6 | `bin/check_runai.sh`<br>Run:ai の可用性確認 | 3 min | phase 2's two Run:ai variants may crash-loop live<br>Run:ai 系 2 本が実演中に落ちうる |
-| 7 | GPU quota `L-DB2E81BA` ≥ 64 vCPU | 5 min | arms queue instead of launching<br>arm が起動せず待ちになる |
-| 8 | Confirm the vLLM DLC tag still exists<br>vLLM DLC のタグ存在確認 | 2 min | `ImagePullBackOff`<br>同 |
+| 1 | `terraform apply` to build both clusters<br>クラスター 2 面を作成 | 25–30 min | 30 minutes is spent on the day<br>当日に 30 分かかる |
+| 2 | `bin/bench.sh arm-a-baseline`, then `snapshot/snapshot-from-node.sh`<br>arm A 実行後にスナップショット作成 | 10 min | arm B cannot be run<br>arm B が実行できない |
+| 3 | `snapshot/stage-model.sh` to upload the weights<br>ウェイトを S3 にアップロード | 5–10 min | phase 2 cannot be run<br>フェーズ 2 が実行できない |
+| 4 | `bin/prep.sh` to apply the arms<br>arm を適用 | 2 min | nothing can be run<br>何も実行できない |
+| 5 | Run all four arms, the warm run, and all three phase-2 variants once<br>4 arm、warm 実行、フェーズ 2 の 3 通りを 1 回ずつ実行 | 40–50 min | the first execution happens during the session<br>初回実行が本番になる |
+| 6 | `bin/check_runai.sh`<br>Run:ai の対応確認 | 3 min | the two Run:ai variants may fail during the session<br>Run:ai 系 2 本が本番で失敗しうる |
+| 7 | Check GPU quota `L-DB2E81BA` is at least 64 vCPU | 5 min | arms wait for capacity instead of starting<br>arm が起動せず待ちになる |
+| 8 | Check the vLLM DLC tag still exists<br>vLLM DLC のタグ存在確認 | 2 min | `ImagePullBackOff`<br>同 |
 
-**Step 5 matters most.** Keep those results — if the live run fails you can show
-the previous day's real numbers and carry on. Treat the live demo as showing *how*
-the numbers are made, not as the only chance to make them.
+Keep the results from step 5. If a live run fails, the previous day's figures can be
+shown instead and the session can continue. The live run demonstrates how the figures
+are produced; it is not the only opportunity to produce them.
 
-**5 が最重要です。** その結果を保存しておけば、ライブが転んでも前日の実測値を出して
-議論を続けられます。ライブ実演は「数字の作り方を見せるもの」で、「数字を作る唯一の機会」
-ではないと割り切ってください。
+5 の結果は保存しておいてください。本番の実行が失敗した場合、前日の数字を出して進行を
+続けられます。本番の実行は数字の作り方を示すもので、数字を得る唯一の機会ではありません。
 
 ```bash
 cp -r results results-dryrun-$(date +%Y%m%d)
@@ -58,430 +51,405 @@ Sixty minutes.
 
 | Time | Content | Live? |
 |---|---|---|
-| 0:00–0:05 | Purpose and scope. State that custom AMI builds are out of scope.<br>目的とスコープ。カスタム AMI は対象外と明示 | slides |
-| 0:05–0:15 | **Section 1: where the time goes.** Run arm A and wait.<br>時間がどこに消えるか。arm A を実行して待つ | live |
-| 0:15–0:27 | **Section 2: two mechanisms, mutually exclusive.** Arms B and C.<br>2 方式とその排他性。arm B と C | live |
-| 0:27–0:34 | **Section 3: Auto Mode.** Show the config diff first, then the number.<br>Auto Mode。先に設定差分、次に数字 | diff + prior numbers |
-| 0:34–0:39 | **Warm scale-out.** Once-per-node cost.<br>warm スケールアウト。ノード 1 回コスト | live (1s) |
-| 0:39–0:50 | **Section 4: weights, three variants, TTFT.**<br>ウェイト 3 通りと TTFT | prior numbers |
-| 0:50–1:00 | **Section 5: what to adopt.** Discussion.<br>何を採用するか。議論 | discussion |
+| 0:00–0:05 | Purpose and scope. State that custom AMI builds are out of scope.<br>目的とスコープ。カスタム AMI は対象外と伝える | slides |
+| 0:05–0:15 | Step 1: the baseline. Run arm A.<br>ステップ 1: ベースライン。arm A を実行 | live |
+| 0:15–0:27 | Steps 2 and 3: the two image mechanisms.<br>ステップ 2 と 3: イメージ配送の 2 方式 | live |
+| 0:27–0:34 | Step 4: Auto Mode. Show the configuration diff, then the figures.<br>ステップ 4: Auto Mode。設定差分を見せてから数字 | diff and prior figures |
+| 0:34–0:39 | Step 5: warm scale-out.<br>ステップ 5: warm スケールアウト | live (1s) |
+| 0:39–0:50 | Step 6: weights, three variants, TTFT.<br>ステップ 6: ウェイト 3 通りと TTFT | prior figures |
+| 0:50–1:00 | Section 5: what to adopt. Discussion.<br>セクション 5: 何を採用するか。議論 | discussion |
 
-**Arm A's run leaves you a wait of a minute or two, and the screen does not go
-blank** — `bench.sh` prints each step's number as it completes:
+Arm A's run takes one to two minutes. During that time `bench.sh` prints each step's
+figure as it completes:
 
-**arm A の実行で 1〜2 分の待ちができますが、画面は空白になりません。** `bench.sh` は
-各段階の数字をその都度出します。
+arm A の実行には 1〜2 分かかります。その間、`bench.sh` は各段階の数字を完了時に出力します。
 
 ```
   node Ready                                  29s          9s
   pod bound to the node                       29s          0s
   image pull started                          30s          1s
-  image pull finished                        126s         96s   <- stalls here
+  image pull finished                        126s         96s
 ```
 
-**That one stalling line is the argument.** Everything before it scrolls past in
-half a minute; then nothing moves. Point at the silence:
+The output stops after "image pull started" and resumes when the pull completes. That
+pause is the measurement the workshop is about, so it is worth describing while it
+happens:
 
-**この 1 行で止まることが、そのまま主張です。** それ以前は 30 秒で流れ、そこから動かなく
-なります。その沈黙を指して話してください。
+出力は "image pull started" の後で止まり、pull 完了時に再開します。この間の停止が
+ワークショップの主題となる計測なので、その間に説明する価値があります。
 
-> That is where we are now. The node was ready in about thirty seconds. What we are
-> waiting for is the image.
+> The node was ready in about thirty seconds. What we are waiting for now is the image.
 >
-> いま止まっているのがそれです。ノードは 30 秒程度でできています。待っているのは
-> イメージです。
+> ノードは 30 秒程度でできています。いま待っているのはイメージです。
 
-While it stalls, show the manifest diffs (keep these open in tabs):
+While waiting, show the configuration diffs. Keep these open in advance:
 
-止まっている間に、マニフェストの差分を見せてください（事前にタブで開いておく）。
+待っている間に設定差分を表示してください。事前に開いておきます。
 
 ```bash
-diff -u manifests/rendered/10-arm-a-baseline.yaml manifests/rendered/12-arm-c-soci.yaml
-diff -u manifests/rendered/12-arm-c-soci.yaml manifests/rendered/13-arm-d-automode.yaml
+bin/show_config.sh arm-c-soci        # against the baseline
+bin/show_config.sh arm-d-automode    # against arm C
 ```
-
-The second diff is the strongest single screen in the workshop. **Count the lines
-present on the left and absent on the right.**
-
-2 本目の差分が、このワークショップで最も効く 1 画面です。**左にあって右に無い行を
-数えてもらってください。**
 
 ---
 
-## 2. What to say / 話す内容
+## 2. What to cover in each step / 各ステップで扱う内容
 
-### Section 1 — where the time goes
+### Step 1 — the baseline
 
-Start `bin/bench.sh arm-a-baseline`, then talk while it runs.
+Start `bin/bench.sh arm-a-baseline`, then describe what it is measuring.
 
-> This is the baseline: Bottlerocket exactly as it ships. Every number after this is
-> measured against it.
+> This is Bottlerocket with its default settings. The figures from this run are what the
+> later arms are compared against.
 >
-> ベースラインです。Bottlerocket を素のまま使っています。以降の数字はすべてこれとの
-> 比較になります。
+> Bottlerocket を既定設定で動かしています。この実行の数字が、以降の arm の比較対象に
+> なります。
 
 When it finishes:
 
-> Provisioning was under half a minute. The image pull was roughly three times
-> everything else put together. **The fix is not in how you provision nodes — it is
-> in how the image gets to them.** Get that the wrong way round and you spend a
-> sprint tuning Karpenter.
+> Provisioning took about thirty seconds. The image pull took ninety-six. So the
+> difference between the arms is going to come from how the image reaches the node, not
+> from how the node is provisioned.
 >
-> プロビジョニングは 30 秒未満。イメージ pull はそれ以外の合計の約 3 倍でした。
-> **改善すべきはノードの作り方ではなく、イメージの届け方です。** ここを取り違えると
-> Karpenter の設定に無駄な時間を使います。
+> プロビジョニングは約 30 秒、イメージ pull は 96 秒でした。したがって arm 間の差は、
+> ノードの作り方ではなくイメージの届き方から生じます。
 
-Establish credibility of the method in one sentence:
+Cover how the breakdown is produced, because it determines whether the figures are worth
+discussing:
 
-計測方法の信頼性を 1 文で担保します。
+内訳の算出方法にも触れてください。数字を議論に使えるかを決める部分です。
 
-> This breakdown is not an estimate. It is the timestamps already in the Pod
-> conditions, the NodeClaim conditions and the kubelet events, sorted and
-> subtracted. **That is why the stages sum exactly to the total** — there is no
-> unattributed time.
+> These stages are the timestamps that are already in the Pod conditions, the NodeClaim
+> conditions and the kubelet events, sorted and subtracted. That is why they add up to
+> the total: no interval is left out.
 >
-> この内訳は推定ではありません。Pod の condition、NodeClaim の condition、kubelet の
-> イベントに元から入っている時刻を並べて差を取っただけです。**だから段階の合計は
-> 全体と厳密に一致します。** 取りこぼした時間はありません。
+> ここに出ている段階は、Pod の condition、NodeClaim の condition、kubelet のイベントに
+> 元から入っている時刻を並べて差を取ったものです。だから合計が全体と一致します。除外して
+> いる区間はありません。
 
-Then read the throughput line — it is the bridge to arm C:
+Then read the throughput figure, which leads into step 3:
 
-続いてスループットの行を読みます。arm C への導線になります。
+続いてスループットの数字を読みます。ステップ 3 への導入になります。
 
 > Nine gigabytes in ninety-six seconds is about a hundred megabytes a second. This
-> instance can do far more than that. **We are not using the link we are paying
-> for**, because layers are being unpacked one at a time.
+> instance supports up to 25 Gbps, so the pull was not limited by the network. Layers
+> are being downloaded and unpacked one at a time.
 >
-> 9 GB を 96 秒、約 100 MB/秒です。このインスタンスはもっと出せます。**支払っている
-> 帯域を使い切れていません。** レイヤを 1 つずつ順番に展開しているからです。
+> 9 GB を 96 秒、約 100 MB/秒です。このインスタンスは最大 25 Gbps に対応するので、pull は
+> ネットワークで律速されていません。レイヤを 1 つずつダウンロード・展開しています。
 
-### Section 2 — two mechanisms, and you only get one
+### Steps 2 and 3 — the two image mechanisms
 
-**Lead with the exclusivity**, before either number.
+State that the two cannot be combined before showing either set of figures.
 
-**先に排他性を言ってください。** 数字より前に。
+どちらの数字を出す前に、2 つが併用できないことを伝えてください。
 
-> There are two approaches and **you can only have one of them.** You can write both
-> sets of settings, but it is pointless, because they compete for the same volume —
-> the one Bottlerocket uses for container images.
+> There are two approaches, and they cannot both be applied to the same node. Both govern
+> the volume Bottlerocket uses for container images, so setting up one means the other is
+> not used.
 >
-> 方法は 2 つあり、**どちらか一方しか選べません。** 両方の設定を書くことはできますが
-> 無意味です。Bottlerocket がコンテナイメージに使う同じボリュームを取り合うからです。
+> 方法は 2 つあり、同じノードには併用できません。どちらも Bottlerocket がコンテナ
+> イメージに使うボリュームを対象にしているため、一方を設定するともう一方は使われません。
 
-Run arm B (fast, good live):
+Show arm B's configuration before running it. It is one field, which is worth displaying
+rather than describing:
 
-> The pull stage is gone. kubelet reports the image as already present on the
-> machine. It never contacted the registry.
+arm B は実行前に設定を表示してください。1 フィールドなので、口頭で説明するより表示する
+方が早いです。
+
+```bash
+bin/show_config.sh arm-b-snapshot
+```
+
+After the run:
+
+> There is no pull stage. kubelet reported the image as already present, so the registry
+> was not contacted.
 >
-> pull の段が消えました。kubelet はイメージが既にマシン上にあると報告しています。
-> レジストリには一度も行っていません。
+> pull の段階がありません。kubelet はイメージが既に存在すると報告しており、レジストリには
+> 接続していません。
 
-**Then volunteer the cost, before anyone asks:**
+Then state the cost, before it is asked about:
 
-**誰かに聞かれる前に、コストを自分から出してください。**
+続いて、質問される前にコストを伝えてください。
 
-> That speed has a price. Building the snapshot took several minutes, and it has to
-> be rebuilt every time the image changes. Hold that thought for section 5.
+> Building that snapshot took several minutes, and it has to be rebuilt whenever the
+> image changes. That is the figure to weigh against the improvement in section 5.
 >
-> この速さには値段があります。スナップショット作成に数分かかり、イメージを更新する
-> たびに作り直します。セクション 5 まで覚えておいてください。
+> このスナップショットの作成には数分かかり、イメージが変わるたびに作り直しが必要です。
+> セクション 5 で改善幅と比較する数字はこれです。
 
-Then arm C:
+For arm C, show the configuration and note that Bottlerocket takes TOML settings:
 
-> Instead of pre-baking, we move container storage to the instance's local NVMe and
-> switch the snapshotter to SOCI in parallel pull/unpack mode. **The image is
-> completely unmodified** — no index to build, no change to your build pipeline.
+arm C では設定を表示し、Bottlerocket が TOML 設定を取ることに触れてください。
+
+> Two additions. A policy line, and Bottlerocket settings in TOML. Bottlerocket's
+> userData is settings, not a shell script, which differs from Amazon Linux.
 >
-> 事前焼き込みの代わりに、コンテナストレージをインスタンスのローカル NVMe に移し、
-> snapshotter を SOCI の parallel pull/unpack モードにします。**イメージは一切
-> 変更しません。** index の作成もビルドパイプラインの変更も不要です。
+> 追加は 2 箇所です。ポリシー 1 行と、TOML の Bottlerocket 設定です。Bottlerocket の
+> userData はシェルスクリプトではなく設定であり、この点は Amazon Linux と異なります。
 
-> A against C is the honest comparison in this whole workshop: same provisioner,
-> same OS, same instance type, one mechanism changed.
+> Arm A and arm C differ by one mechanism, with the same provisioner, OS and instance
+> type. That makes the difference between them attributable to that mechanism.
 >
-> A と C の比較が、このワークショップで最も厳密です。プロビジョナ、OS、インスタンス
-> タイプが同一で、変えたのは 1 つの方式だけです。
+> arm A と arm C は、プロビジョナ・OS・インスタンスタイプが同じで、異なるのは 1 つの方式
+> だけです。このため両者の差はその方式に帰属できます。
 
-### Section 3 — Auto Mode
+### Step 4 — Auto Mode
 
-**Show the diff before the number. Do not reverse this.**
+Show the configuration diff before the figures.
 
-**数字より先に差分を見せてください。順番を逆にしないこと。**
+数字より先に設定差分を表示してください。
 
-> Here is arm C's node class against arm D's. **Count what is on the left and not on
-> the right.** `instanceStorePolicy` — gone. Six lines of Bottlerocket settings —
-> gone. Block device mappings — gone.
+```bash
+bin/show_config.sh arm-d-automode
+```
+
+> `instanceStorePolicy` is absent. The six lines of Bottlerocket settings are absent. The
+> block device mappings are absent. On a GPU instance with local NVMe, Auto Mode formats
+> the NVMe, places container storage on it, and pulls and unpacks in parallel.
 >
-> arm C と arm D の node class です。**左にあって右に無いものを数えてください。**
-> `instanceStorePolicy` が無い。Bottlerocket の設定 6 行が無い。ブロックデバイスの
-> 指定が無い。
+> `instanceStorePolicy` がありません。Bottlerocket 設定 6 行もありません。ブロック
+> デバイスの指定もありません。ローカル NVMe 付き GPU インスタンスでは、Auto Mode が NVMe を
+> フォーマットし、コンテナストレージを配置し、並列で pull・展開します。
 
-> And yet on a GPU instance with local NVMe, Auto Mode formats the NVMe, puts
-> container storage on it, and pulls and unpacks in parallel. **That is arm C's
-> configuration, done by the service.**
+State the two options that are not available:
+
+使えない選択肢を 2 点伝えてください。
+
+> Two things are not available here. There is no `snapshotID` on the NodeClass, so step
+> 2's mechanism cannot be used — a workload that needs pre-baked images cannot run on
+> Auto Mode. And the SOCI settings are not exposed, so the service defaults apply.
 >
-> それでもローカル NVMe 付き GPU インスタンスでは、Auto Mode が NVMe をフォーマット
-> し、コンテナストレージをそこに置き、並列で pull・展開します。**arm C で手で書いた
-> 内容が、サービス側で入っています。**
+> ここで使えないものが 2 点あります。NodeClass に `snapshotID` が無いため、ステップ 2 の
+> 方式は使えません。イメージの事前焼き込みが必要なワークロードは Auto Mode では動きません。
+> また SOCI の設定は露出しておらず、サービスの既定値が適用されます。
 
-**Volunteer both limitations yourself.** Concealing them costs more later.
+State the cluster difference:
 
-**できないことを 2 点、自分から言ってください。** 隠すと後で高くつきます。
+クラスターが異なる点も伝えてください。
 
-> Two things it cannot do. First, **there is no `snapshotID` on its NodeClass** —
-> `ephemeralStorage` is size, IOPS, throughput and KMS key only. So **arm B's
-> mechanism is not available on Auto Mode.** If pre-baked images are the right
-> answer for a workload, that workload does not go here. Second, **the SOCI tuning
-> knobs are not exposed**; you get the service defaults.
+> Arm D runs on a separate cluster, because self-managed Karpenter and Auto Mode both own
+> the same CRDs. The VPC, subnets and instance type are the same, so the pull path is the
+> same, but the control plane is not. And the timing difference between arm C and arm D
+> is within the run-to-run variation — the reference results have two runs where the
+> ordering between them is different. The difference in configuration is consistent; the
+> difference in timing is not.
 >
-> できないことが 2 点あります。1 つ目、**NodeClass に `snapshotID` がありません。**
-> `ephemeralStorage` は size / IOPS / throughput / KMS キーのみです。つまり
-> **arm B の方式は Auto Mode では取れません。** あるワークロードの答えが事前焼き込み
-> なら、それはここには乗りません。2 つ目、**SOCI のチューニング項目は露出していません。**
-> サービスの既定値を使うことになります。
+> arm D は別のクラスターで動きます。self-managed Karpenter と Auto Mode が同じ CRD を
+> 所有するためです。VPC・サブネット・インスタンスタイプは同じで pull 経路も同じですが、
+> コントロールプレーンは異なります。また arm C と arm D の時間差は実行ごとのばらつきの
+> 範囲内です。参考計測には両者の順序が異なる 2 回分が入っています。設定量の差は一定ですが、
+> 時間の差は一定ではありません。
 
-Also disclose the cluster difference:
+### Step 5 — warm scale-out
 
-クラスターが別である点も開示します。
+Run this immediately after arm C, while that node is still present. It takes about a
+second.
 
-> Arm D is measured on a separate cluster — self-managed Karpenter and Auto Mode own
-> the same CRDs, so we did not co-locate them. Same VPC, subnets and instance type,
-> so the pull path is identical, but the control plane is not. **Read A versus C as
-> exact, and D as an indication of what you get for no configuration.**
+arm C の直後、そのノードが残っている間に実行してください。1 秒程度で終わります。
+
+> Everything so far measured the first pod on a new node. When a deployment scales out,
+> some pods are scheduled onto nodes that are already running. This is the same arm with
+> the node kept.
 >
-> arm D は別クラスターで計測しています。self-managed Karpenter と Auto Mode が同じ
-> CRD を持つため同居させませんでした。VPC・サブネット・インスタンスタイプは同一なので
-> pull 経路は同じですが、コントロールプレーンは別です。**A と C の比較を厳密、
-> D は「無設定で何が得られるか」の目安として読んでください。**
+> ここまではすべて、新しいノードでの 1 個目の Pod を計測しています。Deployment が
+> スケールアウトすると、一部の Pod はすでに動いているノードにスケジュールされます。これは
+> 同じ arm を、ノードを残して実行したものです。
 
-### Warm scale-out
-
-Run it immediately after arm C, while that node is still up. It takes about a second.
-
-arm C の直後、そのノードが残っているうちに実行してください。1 秒程度で終わります。
-
-> That was **the first pod on a new node.** Real scale-out usually is not that. It
-> lands on a node that is already running. Same arm, node kept this time.
+> Ninety-six of the ninety-seven seconds was incurred once per node, not once per pod.
+> Two things follow. First, arm B's improvement applies to the first pod on a node and
+> not to this one. Second, if most of your pods land on nodes that are already running,
+> the three mechanisms we just measured affect a small part of your total startup time,
+> and node capacity policy affects more of it.
 >
-> いまのは**新しいノードの 1 個目の Pod**です。実際のスケールアウトは通常そうでは
-> ありません。すでに動いているノードに乗ります。同じ arm を、ノードを消さずにもう一度。
+> 97 秒のうち 96 秒が、Pod ごとではなくノード 1 台につき 1 回発生する分でした。ここから
+> 2 点が言えます。1 つ目、arm B の改善はノードの 1 個目の Pod に効き、この Pod には効きません。
+> 2 つ目、Pod の大半がすでに動いているノードに乗る場合、いま計測した 3 方式が影響するのは
+> 起動時間全体の一部で、ノードのキャパシティ方針の方が影響が大きくなります。
 
-> Nearly all of the cold number was a **once-per-node** cost, not once-per-pod.
-> I am showing you this for one specific reason: **it stops the snapshot being
-> over-credited.** A snapshot helps the cold pod and does nothing at all for the
-> warm one.
+Question to put to participants:
+
+参加者への質問:
+
+> What proportion of your pods are scheduled onto new nodes, and what proportion onto
+> nodes that are already running?
 >
-> cold の数字のほぼ全部が**ノード 1 台につき 1 回だけ**のコストで、Pod ごとでは
-> ありません。これを見せる理由は 1 つで、**スナップショットを過大評価しないため**です。
-> スナップショットが効くのは cold な 1 個目だけで、warm には何もしません。
+> Pod のうち、新しいノードにスケジュールされる割合と、すでに動いているノードに
+> スケジュールされる割合はどれくらいですか。
 
-**Then ask the question that reframes everything:**
+### Step 6 — weights, and why there are three variants
 
-**そして全体を再定義する問いを投げてください。**
+Explain the two variables before showing any figures.
 
-> When your pods scale out, what fraction land on new nodes versus nodes that are
-> already running? If it is mostly the latter, **none of the three mechanisms we
-> just measured is where your time goes** — the answer is capacity policy instead.
+数字を出す前に、変数が 2 つあることを説明してください。
+
+> Three variants. The node, model and bytes are the same in all three, and the vLLM
+> arguments differ. There are three rather than two because the loader and the delivery
+> method are separate variables. The first-to-second comparison changes only the loader.
+> The second-to-third changes only the delivery.
 >
-> Pod が増えるとき、新しいノードに乗る割合と既存ノードに乗る割合はどれくらいですか。
-> 後者が大半なら、**いま計測した 3 方式はどれもあなたの時間の使われ先ではありません。**
-> 答えはキャパシティ方針になります。
+> 3 通りです。ノード、モデル、バイト列は 3 つとも同じで、vLLM の引数が異なります。3 つある
+> のは、ローダーと配送方法が別の変数だからです。1 つ目から 2 つ目はローダーのみ、2 つ目から
+> 3 つ目は配送のみが変わります。
 
-### Section 4 — weights, and why there are three variants
+Point at the vLLM timings in the output:
 
-**State the two-effect split before any number.**
+出力に含まれる vLLM の内訳を指してください。
 
-**数字の前に、効果が 2 段に分かれていることを説明してください。**
-
-> Three variants. Same node, same model, same bytes. **Only the loader differs** —
-> and there are three rather than two because **the effect splits in two.**
+> These lines come from vLLM's log. Reading the weights took 0.31 seconds out of
+> ninety-six. Compiling and warming the engine took about forty-two. A faster loader can
+> only affect the 0.31 seconds.
 >
-> 3 通りです。ノード・モデル・バイト列は同一で、**変えたのはローダーだけ**。3 つある
-> 理由は、**効果が 2 段に分かれるから**です。
+> この行は vLLM のログです。ウェイトの読み込みは 96 秒中 0.31 秒でした。コンパイルと
+> エンジンのウォームアップで約 42 秒です。より速いローダーが影響できるのは 0.31 秒の側
+> だけです。
 
-> First to second changes **only the loader** — identical bytes on identical disk, so
-> that difference is what concurrent tensor streaming is worth on its own. Second to
-> third changes **only the delivery** — the copy step disappears. Reporting them
-> separately is what stops one effect being credited to the other.
+When the loader-only variant shows no change:
+
+ローダーのみの variant で差が出なかった場合:
+
+> The total did not change. At this model size reading the weights was already a small
+> part of the startup time, so a faster way of reading them had little to affect. Without
+> the vLLM log lines, this result would only show that the total did not change, without
+> indicating why.
 >
-> 1 つ目から 2 つ目は**ローダーのみ**の変更です。同じディスクの同じバイト列なので、
-> その差は並列ストリーミング単体の効果です。2 つ目から 3 つ目は**配送のみ**の変更で、
-> コピー工程が消えます。分けて報告するのは、**一方の効果をもう一方の功績にしない**ためです。
+> 合計は変わりませんでした。このモデルサイズではウェイトの読み込みが元から起動時間のごく
+> 一部であり、速く読む手段が影響できる範囲が小さかったためです。vLLM のログが無ければ、
+> この結果は合計が変わらなかったことしか示さず、理由は分かりません。
 
-**Point at the vLLM timings.** This is the part most likely to be misread:
+For the S3-direct variant:
 
-**vLLM の内訳を指してください。** ここが最も誤読されやすい部分です。
+S3 直読みの variant では:
 
-> Look under "workload becomes Ready". These lines are from vLLM's own log.
-> **Reading the weights is a fraction of a second. Compiling and warming the engine
-> is tens of seconds.** A faster loader can only touch the fraction of a second.
+> This one reduced the total, from ninety-six to eighty-two seconds. The model load time
+> went up, from 0.63 to 3.36 seconds, so reading from S3 is slower per tensor than
+> reading from local disk. The reduction comes from removing the copy step. At a larger
+> model size the loader would account for more of the time.
 >
-> 「workload becomes Ready」の下を見てください。これは vLLM 自身のログです。
-> **ウェイトの読み込みは 1 秒未満。コンパイルとエンジンのウォームアップが数十秒です。**
-> ローダーの高速化が触れるのは 1 秒未満の側だけです。
+> こちらは合計を 96 秒から 82 秒に短縮しました。モデルロード時間は 0.63 秒から 3.36 秒に
+> 増えており、S3 からの読み込みはテンソル単位ではローカルディスクより遅くなっています。
+> 短縮分はコピー工程が無くなったことによります。モデルが大きければ、ローダーが占める割合も
+> 大きくなります。
 
-If the loader-only variant shows no gain, **say so plainly — it is the useful
-result**:
+Cover serialisation and credentials:
 
-ローダーのみの変更で差が出なかった場合、**そのまま言ってください。それが有用な結果です。**
+直列化と認証情報についても触れてください。
 
-> Essentially nothing changed, and that is worth more than a win would have been. At
-> this model size **the weights were never the bottleneck**, so a faster way of
-> reading them had nothing to win. Had we shown only a before-and-after total, we
-> would have concluded the tool does not work. The vLLM timings show it was never
-> given anything to do.
+> kubelet pulls the init image, runs the init container, and then pulls the workload
+> image. Those do not overlap, so moving weights out of the image can increase
+> start-to-Ready even though the image is smaller.
 >
-> ほぼ変わりませんでした。これは改善が出るより価値があります。このモデルサイズでは
-> **ウェイトが最初からボトルネックではなかった**ので、速く読む手段に取り分が
-> ありませんでした。前後の合計だけ見ていたら「このツールは効かない」と結論していたはずです。
-> vLLM の内訳が、そもそも仕事を与えられていなかったことを示しています。
+> kubelet は init イメージを pull し、init コンテナを実行し、その後で本体イメージを pull
+> します。これらは重ならないため、イメージからウェイトを出してイメージが小さくなっても
+> start-to-Ready が伸びる場合があります。
 
-For the S3-direct variant, be precise about where the gain comes from:
-
-S3 直読みでは、短縮の出所を正確に言ってください。
-
-> That one does move — but not by loading faster. Streaming from S3 is slightly
-> slower per tensor than reading local disk. **The gain is from deleting a step**,
-> not from doing it faster. On a larger model the loader would matter too; at this
-> size, only the delivery does.
+> Credentials come from EKS Pod Identity rather than the node role. Karpenter sets the
+> IMDS hop limit to 1, so containers cannot reach instance metadata. That prevents pods
+> from using node permissions, and binding a role to a service account is what to use in
+> production.
 >
-> こちらは動きます。ただしロードが速いからではありません。S3 ストリーミングは
-> テンソル単位ではローカルディスクより僅かに遅いです。**短縮の出所は工程の削除**で、
-> 高速化ではありません。大きいモデルならローダーも効きますが、このサイズでは配送だけです。
-
-Serialisation is worth naming explicitly:
-
-直列化は明示的に言う価値があります。
-
-> One structural point: kubelet pulls the init image, runs the init container, and
-> **only then** pulls the workload image. Those are serialised. **So moving weights
-> out of the image can push start-to-Ready up even though the image got smaller.**
-> The S3-direct variant deletes that step rather than optimising it.
->
-> 構造的な点を 1 つ。kubelet は init イメージを pull し、init コンテナを実行し、
-> **その後で**本体イメージを pull します。直列です。**つまりイメージからウェイトを
-> 出しても、イメージが小さくなったのに start-to-Ready が伸びることがあります。**
-> S3 直読みはこの工程を最適化するのではなく削除します。
-
-Mention TTFT and credentials in a line each:
-
-> Ready only means vLLM answers its health endpoint. **Submit to first token is the
-> number a user would feel.**
->
-> Ready は vLLM が health に応答することしか意味しません。**submit から最初のトークン
-> までが、利用者が体感する数字です。**
-
-> Credentials come from **EKS Pod Identity**, not the node role. Karpenter sets the
-> IMDS hop limit to 1, so containers cannot reach instance metadata — which is the
-> correct default. Scoping a role to one service account is both what works and what
-> to do in production.
->
-> 認証情報は**ノードロールではなく EKS Pod Identity** から取得します。Karpenter は
-> IMDS の hop limit を 1 にするため、コンテナはメタデータに到達できません。これは
-> 正しい既定です。サービスアカウント単位でロールを絞ることが、動く方法であり本番でも
-> 正しい方法です。
+> 認証情報はノードロールではなく EKS Pod Identity から取得します。Karpenter は IMDS の
+> hop limit を 1 に設定するため、コンテナはインスタンスメタデータに到達できません。これは
+> Pod がノードの権限を使うことを防ぐもので、サービスアカウントにロールを紐付ける方法は
+> 本番でも使えます。
 
 ### Section 5 — what to adopt
 
-Put the decision table on screen and talk less. This is discussion time.
+Display the decision table and leave time for discussion.
 
-判断表を画面に出し、話す量を減らしてください。議論の時間です。
+判断表を表示し、議論の時間を残してください。
 
-> What you take away is the runbook and the method. **The numbers that matter are
-> the ones from your own Dev account.**
+> What you take away is the repository and the measurement method. The figures to base a
+> decision on are the ones from your own account.
 >
-> 持ち帰るのは手順書と計測方法です。**判断に使える数字は、あなたの Dev アカウントで
-> 出る数字です。**
+> 持ち帰るのはリポジトリと計測方法です。判断に使う数字は、自分のアカウントで出る数字です。
 
-> Two questions decide most of it, and neither is a matter of opinion. **How often do
-> your images change** — that is the fork between B and C. And **how much of your
-> startup cost is once-per-node** — that is whether any of this is the right thing
-> to optimise at all.
+> Two measurements determine most of the choice: how often your images change, which is
+> what decides between arms B and C; and how much of your startup time is incurred once
+> per node, which decides whether any of these mechanisms affects most of it.
 >
-> 大半を決めるのは 2 つの問いで、どちらも意見の問題ではありません。**イメージの更新
-> 頻度** — B と C の分かれ目です。そして**起動コストのうちノード 1 回あたりの割合** —
-> そもそもこれが最適化すべき対象かどうかを決めます。
+> 選択の大半は 2 つの計測で決まります。イメージの更新頻度（arm B と C のどちらを選ぶかを
+> 決める）と、起動時間のうちノード 1 回あたりに発生する分（これらの方式が全体の大部分に
+> 影響するかを決める）です。
 
 ---
 
-## 3. When it breaks / 転んだとき
+## 3. When something fails / 失敗した場合
 
-| Symptom / 症状 | Cause / 原因 | On the spot / その場の対応 |
+| Symptom / 症状 | Cause / 原因 | Action / 対応 |
 |---|---|---|
-| Node will not launch<br>ノードが立たない | GPU quota or capacity<br>クォータか在庫 | Switch to `results-dryrun-*` and run `bin/report.py` on it. **Do not apologise** — say "these are yesterday's measurements".<br>前日結果に切替。**謝らず**「前日の実測です」と言う |
-| `ImagePullBackOff` | DLC tag moved<br>タグが変わった | Replace `WORKLOAD_IMAGE` in `config.env`. Will not happen if step 8 was done.<br>`config.env` を差し替え。前日確認済みなら起きない |
-| Arm C matches arm A<br>arm C が arm A と同じ | Bottlerocket < 1.44.0, SOCI silently off<br>SOCI が無効 | `prep.sh` blocks this beforehand. If it happens anyway, **use it** — it shows the version dependency.<br>`prep.sh` が事前に止める。起きたら**それ自体を材料に** |
-| Arm B pod Pending | No snapshot, node class not applied<br>スナップショット未作成 | Check `results/snapshot-id.txt`. Skip arm B live and use prior numbers.<br>確認し、arm B は前日の数字で |
-| Pod never Ready, `nvidia-smi` fails<br>Ready にならない | Kubernetes < 1.34 with a CUDA 13 image<br>版不一致 | Pre-day check. Nothing to do live.<br>前日確認事項 |
-| Run:ai variants crash-loop | `runai-streamer` missing, S3 permissions, region unset<br>不足・権限・region 未設定 | Show `runai-local` only — the loader-only effect still lands.<br>`runai-local` だけ見せる |
-| TTFT probe fails | ConfigMap missing<br>ConfigMap 未作成 | `bin/prep.sh` creates it. Fall back to Ready-only numbers.<br>Ready までの数字で話す |
-| Running late<br>時間が押している | — | Cut phase 2 from three variants to two (first and third). **Never cut section 5** — without it the session ends as "we watched a demo".<br>phase 2 を 1 つ目と 3 つ目の 2 本に削る。**セクション 5 は削らない** |
+| The node does not launch<br>ノードが起動しない | GPU quota or capacity<br>クォータか在庫 | Use `results-dryrun-*` with `bin/report.py` and say the figures are from the previous day<br>`results-dryrun-*` を `bin/report.py` で表示し、前日の数字と伝える |
+| `ImagePullBackOff` | The DLC tag has changed<br>DLC のタグが変わった | Update `WORKLOAD_IMAGE` in `config.env`. Task 8 prevents this.<br>`config.env` の `WORKLOAD_IMAGE` を更新。作業 8 で防げる |
+| Arm C's figures match arm A's<br>arm C が arm A と同じ | Bottlerocket earlier than 1.44.0, so the SOCI setting is ignored<br>Bottlerocket が 1.44.0 より前で SOCI 設定が無視された | `prep.sh` checks this beforehand. If it occurs, the version dependency can be shown as part of the session.<br>`prep.sh` が事前に確認。発生した場合はバージョン依存の例として扱える |
+| Arm B's pod stays Pending<br>arm B の Pod が Pending | No snapshot, so the node class was not applied<br>スナップショットが無く node class が未適用 | Check `results/snapshot-id.txt`. Use the previous day's figures for arm B.<br>`results/snapshot-id.txt` を確認。arm B は前日の数字で |
+| The pod never becomes Ready and `nvidia-smi` fails<br>Ready にならず `nvidia-smi` が失敗 | Kubernetes earlier than 1.34 with a CUDA 13 image<br>Kubernetes が 1.34 未満で CUDA 13 イメージ | Check this before the day.<br>前日に確認 |
+| The Run:ai variants fail to start<br>Run:ai 系が起動しない | `runai-streamer` missing, S3 permissions, or region unset<br>`runai-streamer` 不在、S3 権限、region 未設定 | Show `runai-local` only; the loader comparison still works.<br>`runai-local` のみ表示。ローダー比較は成立する |
+| The TTFT probe fails<br>TTFT プローブが失敗 | The ConfigMap was not created<br>ConfigMap が未作成 | `bin/prep.sh` creates it. Use the Ready figures.<br>`bin/prep.sh` が作成。Ready までの数字で進める |
+| Running late<br>時間が押している | — | Reduce phase 2 from three variants to two, the first and third. Keep section 5.<br>フェーズ 2 を 1 つ目と 3 つ目の 2 本に減らす。セクション 5 は残す |
 
 ---
 
-## 4. Do not overstate / 言い過ぎないこと
+## 4. Points to state accurately / 正確に伝えるべき点
 
-- **Custom AMI builds are out of scope.** If asked, the honest answer is usually
-  "wait for the upstream release; take the roadmap question up separately".
-  **カスタム AMI ビルドは対象外です。** 聞かれたら「上流のリリースを待つのが安く、
-  ロードマップの話は別途」が誠実な答えです。
-- **Do not present arm D as a like-for-like delta against A or C.** Different
-  control plane. Present it as an indication.
-  **arm D を A や C との like-for-like の差分として出さないこと。** コントロール
-  プレーンが別です。目安として提示してください。
-- **Do not present the SOCI tuning values as a recommendation.** They are AWS's
-  published starting point, not values fitted to anyone's layer profile.
-  **SOCI のチューニング値を推奨として出さないこと。** AWS が公開する出発点であって、
-  誰かのレイヤ構成に合わせた値ではありません。
-- **Do not present one run as settled.** Under ~10% is noise. Re-running is cheap.
-  **1 回の計測を確定値として出さないこと。** 10% 未満はノイズです。再実行は安価です。
-- **Do not present published third-party benchmarks as your measurement.** If you
-  cite Run:ai's own figures for order-of-magnitude context, name the source and the
-  model, and keep them visibly separate from your numbers.
-  **第三者の公開ベンチマークを自分の実測として出さないこと。** 桁の目安として
-  Run:ai 公開値を引くなら、出典とモデルを述べ、自分の数字と明確に分けてください。
-- **Do not frame Run:ai Model Streamer as adding a vendor product.** It is
-  Apache-2.0 and already present in the AWS vLLM DLC base image — no extra licence,
-  no install.
-  **Run:ai Model Streamer を「ベンダー製品の追加導入」として説明しないこと。**
-  Apache-2.0 で、AWS の vLLM DLC ベースイメージに既に含まれています。追加ライセンスも
-  インストールも不要です。
-- **If you show the recording, say that its pace is not the measurement.** Idle time
-  is compressed in playback; the printed elapsed times are real.
-  **録画を見せる場合、再生速度は計測値ではないと必ず言うこと。** 再生上の待ち時間は
-  圧縮されており、表示されている経過秒数が本物です。
+- Custom AMI builds are out of scope. If asked, the answer is to wait for the upstream
+  release and raise the roadmap question separately.
+  カスタム AMI ビルドは対象外です。聞かれた場合は、上流のリリースを待ち、ロードマップの
+  質問は別途扱う、が回答になります。
+- Arm D runs on a different control plane, and its timing difference from arm C is within
+  the run-to-run variation. Present it as what Auto Mode provides without configuration,
+  not as a faster result.
+  arm D はコントロールプレーンが異なり、arm C との時間差は実行ごとのばらつきの範囲内です。
+  速いという結果ではなく、Auto Mode が設定なしで提供する内容として提示してください。
+- The SOCI settings are the values AWS publishes as a starting point. They are not fitted
+  to any particular layer profile.
+  SOCI の設定値は AWS が出発点として公開しているものです。特定のレイヤ構成に合わせた値では
+  ありません。
+- Each arm was measured once. Differences below about 10% need a repeat run before being
+  relied on.
+  各 arm は 1 回の計測です。10% 程度未満の差は、再実行で確認してから判断してください。
+- If you cite Run:ai's published benchmark figures for scale, state the source and the
+  model size, and keep them separate from the figures measured here.
+  規模感のために Run:ai の公開ベンチマーク値を引用する場合は、出典とモデルサイズを述べ、
+  ここで計測した数字とは分けてください。
+- Run:ai Model Streamer is Apache-2.0 licensed and is included in the AWS vLLM DLC base
+  image. No additional licence or installation is involved.
+  Run:ai Model Streamer は Apache-2.0 ライセンスで、AWS vLLM DLC のベースイメージに
+  含まれています。追加のライセンスやインストールは発生しません。
+- If you show the recording, state that idle time is compressed in playback and that the
+  elapsed times shown on screen are the measured values.
+  録画を見せる場合、再生時に待ち時間が短縮されていること、画面に出ている経過時間は計測値
+  そのままであることを伝えてください。
 
 ---
 
 ## 5. Have open / 開いておくもの
 
-1. Two terminals — one running `bench.sh`, one running
+1. Two terminals: one for `bench.sh`, one running
    `watch kubectl get pod,nodeclaim -A`
-   ターミナル 2 枚（`bench.sh` 実行用と `watch` 用）
-2. The two `diff` commands from section 1
-   セクション 1 の `diff` 2 本
-3. `results-dryrun-*/report.md` — for when the live run fails
-   ライブが転んだとき用
+   ターミナル 2 枚（`bench.sh` 用と `watch` 用）
+2. `bin/show_config.sh arm-c-soci` and `bin/show_config.sh arm-d-automode`
+3. `results-dryrun-*/report.md`, in case a live run fails
+   本番の実行が失敗した場合用
 4. The section 5 decision table from the README
    README のセクション 5 判断表
-5. [Auto Mode NodeClass reference](https://docs.aws.amazon.com/eks/latest/userguide/create-node-class.html)
-   — to show when someone asks about `snapshotID`
-   `snapshotID` を聞かれたとき示す
+5. [Auto Mode NodeClass reference](https://docs.aws.amazon.com/eks/latest/userguide/create-node-class.html),
+   for questions about `snapshotID`
+   `snapshotID` について質問が出た場合用
 
 ---
 
-## 6. Afterwards / 終わったあと
+## 6. After the session / 終了後
 
-- **Hand over `results/report.md` as it is. Do not add to it.** Its value is that it
-  contains only what was measured.
-  **`results/report.md` はそのまま渡し、書き足さないこと。** 測ったものだけが入っている
-  ことが価値です。
-- Hand over the repository. **Keep this guide.**
-  リポジトリを渡し、**このガイドは渡さないこと。**
-- **Agree a date for the Follow half.** When will participants re-run this in their
-  own account? Without that date the workshop does not produce a deliverable.
-  **Follow 側の期限を決めること。** 参加者が自分のアカウントで再実行するのはいつまでか。
-  ここを決めないとワークショップが成果物になりません。
-- `terraform destroy`, then delete the snapshot and the staged weights — they are
+- Hand over `results/report.md` unchanged. It contains the measured figures.
+  `results/report.md` はそのまま渡してください。計測した数字が入っています。
+- Hand over the repository. This guide is for the facilitator.
+  リポジトリを渡してください。このガイドは実施側用です。
+- Agree a date by which participants will run the steps in their own account. Without
+  that, the session does not produce figures they can use.
+  参加者が自分のアカウントで手順を実行する期限を決めてください。決めないと、参加者が
+  使える数字が出ません。
+- Run `terraform destroy`, then delete the snapshot and the staged weights, which are
   outside Terraform. See [README](README.md#teardown--破棄).
-  `terraform destroy` の後、Terraform 管理外のスナップショットと S3 のウェイトを削除。
+  `terraform destroy` を実行し、その後 Terraform 管理外のスナップショットと S3 のウェイトを
+  削除してください。

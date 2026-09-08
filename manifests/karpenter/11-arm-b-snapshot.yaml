@@ -5,10 +5,10 @@
 # already contains the image layers, so containerd finds them locally and the
 # pull is a no-op.
 #
-# Note what is NOT set here: instanceStorePolicy. This is the fork in the road
-# the workshop is about. Arm B's images have to be on the volume restored from
-# the snapshot; the moment you move container storage to local NVMe (arm C) the
-# snapshot is bypassed. You get one or the other, not both.
+# instanceStorePolicy is not set here. Arm B needs the images on the volume
+# restored from the snapshot. Setting instanceStorePolicy (arm C) moves container
+# storage to local NVMe, and the restored volume is then unused. The two cannot
+# both be applied to the same node.
 #
 # The volume is 100Gi to match arm A, and must be >= the snapshot size.
 # @SNAPSHOT_ID@ is substituted by bin/prep.sh from results/snapshot-id.txt.

@@ -51,8 +51,10 @@ def main() -> int:
 
     rendered = []
     for line in template.read_text().splitlines():
-        if line.strip() == INIT_TOKEN:
-            # Standalone placeholder line: this is the one real substitution site.
+        # The placeholder is written as a YAML comment so that the template parses as
+        # valid YAML before rendering, which lets editors and linters check it. Both
+        # forms are accepted.
+        if line.strip() in (INIT_TOKEN, f"# {INIT_TOKEN}"):
             if fragment:
                 rendered.extend(fragment.splitlines())
             continue

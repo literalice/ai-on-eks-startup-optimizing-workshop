@@ -1,75 +1,80 @@
 # Step 2 — Pre-bake the image into an EBS snapshot
 # ステップ 2 — イメージを EBS スナップショットに焼き込む
 
-**Goal / 目的:** remove the pull entirely, and find out what that costs.
+**Goal / 目的:** remove the image pull, and measure what maintaining that arrangement
+costs.
 
-pull を完全に消し、その代償を把握します。
+イメージ pull を無くし、その方式の維持コストを把握します。
 
 ---
 
-## The idea / 考え方
+## How it works / 仕組み
 
-Bottlerocket keeps container images on its **data volume**. If that volume is
-restored from a snapshot that already contains the layers, containerd finds them
-locally and there is nothing to pull.
+Bottlerocket stores container images on its data volume. If that volume is restored
+from a snapshot that already contains the image layers, containerd finds them on disk
+and does not contact the registry.
 
-Bottlerocket はコンテナイメージを**データボリューム**に置きます。そのボリュームを、
-既にレイヤを含むスナップショットから復元すれば、containerd はローカルで見つけるため
-pull するものがありません。
+Bottlerocket はコンテナイメージをデータボリュームに保存します。そのボリュームを、
+イメージ層を含むスナップショットから復元すると、containerd はディスク上でそれを見つけ、
+レジストリには接続しません。
 
 ---
 
 ## Part A — build the snapshot / スナップショットを作る
 
-The snapshot has to come from a node that has already pulled the image. Step 1 left
-you one, so **do not reset before doing this**:
+The snapshot has to be taken from a node that has already pulled the image. Step 1
+leaves such a node, so do not run `reset.sh` before this:
 
-スナップショットは、既にイメージを pull したノードから作る必要があります。ステップ 1 の
-ノードが残っているので、**その前に reset しないでください**。
+スナップショットは、イメージを pull 済みのノードから取得する必要があります。ステップ 1 の
+ノードがその状態なので、その前に `reset.sh` を実行しないでください。
 
 ```bash
-bin/bench.sh arm-a-baseline          # if you already reset, run it again
-snapshot/snapshot-from-node.sh       # ~3-5 min
+bin/bench.sh arm-a-baseline          # run again if you have already reset
+snapshot/snapshot-from-node.sh       # takes 3-5 minutes
 ```
 
-What it does / 動作:
+The script does the following / スクリプトの動作:
 
 1. finds the node for the `arm-a-baseline` node pool
    `arm-a-baseline` node pool のノードを見つける
-2. locates its `/dev/xvdb` volume
-   その `/dev/xvdb` ボリュームを特定する
-3. `aws ec2 create-snapshot` on that volume, then waits for `completed`
-   そのボリュームを `create-snapshot` し、`completed` まで待つ
-4. writes the ID to `results/snapshot-id.txt`
-   ID を `results/snapshot-id.txt` に書く
+2. locates that instance's `/dev/xvdb` volume
+   そのインスタンスの `/dev/xvdb` ボリュームを特定する
+3. calls `aws ec2 create-snapshot` on the volume and waits for it to complete
+   そのボリュームに対して `create-snapshot` を実行し、完了まで待つ
+4. writes the snapshot ID to `results/snapshot-id.txt`
+   スナップショット ID を `results/snapshot-id.txt` に書き込む
 
-> **It must be an arm A node, not arm C.** Arm C's `instanceStorePolicy` moves
-> container storage to local NVMe, which leaves its EBS data volume empty. You would
-> snapshot an empty disk and the arm would silently fall back to pulling.
+> The node must be an arm A node. Arm C sets `instanceStorePolicy`, which moves
+> container storage to local NVMe, so an arm C node's EBS data volume is empty.
+> Snapshotting it produces an empty snapshot, and arm B then pulls the image as
+> normal.
 >
-> **対象は arm A のノードで、arm C では駄目です。** arm C は `instanceStorePolicy` で
-> コンテナストレージがローカル NVMe に移るため、EBS データボリュームは空です。空の
-> ディスクをスナップショットしてしまい、arm は黙って pull に戻ります。
+> 対象は arm A のノードである必要があります。arm C は `instanceStorePolicy` を設定して
+> コンテナストレージをローカル NVMe に移すため、arm C ノードの EBS データボリュームは
+> 空です。これをスナップショットすると空のスナップショットができ、arm B は通常どおり
+> pull します。
 
-> **`snapshot/build-snapshot.sh` did not work for us.** It wraps
-> `aws-samples/bottlerocket-images-cache`, which launches its own instance and drives
-> it over SSM Run Command. On the EKS-optimized Bottlerocket NVIDIA AMI the instance
-> never registered with SSM and the script has no timeout, so it hangs. Kept for
-> reference only.
+> `snapshot/build-snapshot.sh` did not work in our environment. It wraps
+> `aws-samples/bottlerocket-images-cache`, which launches its own instance and controls
+> it through SSM Run Command. On the EKS-optimized Bottlerocket NVIDIA AMI the instance
+> did not register with SSM, and the script has no timeout, so it stopped at
+> "Launching SSM". It is kept for reference.
 >
-> **`snapshot/build-snapshot.sh` は当環境では動きませんでした。** SSM Run Command で
-> 専用インスタンスを操作する方式ですが、EKS 最適化 Bottlerocket NVIDIA AMI では SSM に
-> 登録されず、タイムアウトも無いためハングします。参考として残しているだけです。
+> `snapshot/build-snapshot.sh` は当環境では動作しませんでした。
+> `aws-samples/bottlerocket-images-cache` のラッパーで、専用インスタンスを起動して
+> SSM Run Command で操作します。EKS 最適化 Bottlerocket NVIDIA AMI ではインスタンスが
+> SSM に登録されず、スクリプトにタイムアウトが無いため "Launching SSM" で停止しました。
+> 参考として残しています。
 
 ---
 
 ## Part B — the configuration change / 設定変更
 
-**One field.** Compare
-[`11-arm-b-snapshot.yaml`](../manifests/karpenter/11-arm-b-snapshot.yaml) with step
-1's node class:
+One field is added. Compare
+[`11-arm-b-snapshot.yaml`](../manifests/karpenter/11-arm-b-snapshot.yaml) with step 1's
+node class:
 
-**1 フィールドだけです。**
+追加するフィールドは 1 つです。
 
 ```yaml
   blockDeviceMappings:
@@ -84,52 +89,46 @@ What it does / 動作:
         volumeType: gp3
         throughput: 1000
         iops: 16000
-        snapshotID: "snap-0123456789abcdef0"       # <-- THE ONLY CHANGE
+        snapshotID: "snap-0123456789abcdef0"       # the added field
         deleteOnTermination: true
 ```
 
-`bin/prep.sh` substitutes the ID from `results/snapshot-id.txt`, so you do not paste
-it by hand.
+`bin/prep.sh` substitutes the ID from `results/snapshot-id.txt`, so it does not need to
+be entered manually.
 
-`bin/prep.sh` が `results/snapshot-id.txt` から ID を差し込むので、手で貼る必要は
-ありません。
+`bin/prep.sh` が `results/snapshot-id.txt` から ID を差し込むため、手入力は不要です。
 
-| Field | Why / 理由 |
+| Field | Reason / 理由 |
 |---|---|
-| `snapshotID` on `/dev/xvdb` | Restores the data volume from the snapshot. The layers are on disk before kubelet asks for them.<br>データボリュームをスナップショットから復元します。kubelet が要求する前にレイヤがディスク上にあります。 |
-| `volumeSize` ≥ snapshot size | A volume smaller than its snapshot is rejected outright.<br>スナップショットより小さいボリュームは拒否されます。 |
-| `encrypted` is **gone** | Not a downgrade: a restored volume inherits the snapshot's encryption, and the snapshot came from step 1's encrypted volume. Setting it too is allowed but redundant.<br>ダウングレードではありません。復元ボリュームはスナップショットの暗号化を継承し、そのスナップショットはステップ 1 の暗号化ボリューム由来です。併記しても構いませんが冗長です。 |
+| `snapshotID` on `/dev/xvdb` | Restores the data volume from the snapshot, so the layers are on disk before kubelet requests the image.<br>データボリュームをスナップショットから復元します。kubelet がイメージを要求する前に層がディスク上にあります。 |
+| `volumeSize` at least the snapshot size | EC2 rejects a volume smaller than the snapshot it is restored from.<br>EC2 は復元元のスナップショットより小さいボリュームを拒否します。 |
+| `encrypted` is not set here | A volume restored from a snapshot inherits the snapshot's encryption. The snapshot was taken from step 1's encrypted volume, so this volume is encrypted. Setting the field as well is permitted and has no additional effect.<br>スナップショットから復元したボリュームは、スナップショットの暗号化を継承します。ステップ 1 の暗号化ボリュームから取得しているため、このボリュームは暗号化されています。フィールドを併記しても構いませんが、追加の効果はありません。 |
 
-### What is deliberately absent / 意図的に無いもの
+### What is not set / 設定しないもの
 
-**`instanceStorePolicy`.** This is the exclusivity, and it is the single most
-important thing to understand in this workshop:
+`instanceStorePolicy` is not set in this arm. Arm B requires the images to be on the
+volume restored from the snapshot. Setting `instanceStorePolicy` (step 3) moves
+container storage to local NVMe, and the restored volume is then unused. The snapshot
+would still be built and maintained, without affecting the pull.
 
-**`instanceStorePolicy` です。** これが排他性であり、本ワークショップで最も理解すべき
-点です。
-
-> Arm B needs the images on the volume restored from the snapshot. The moment you add
-> `instanceStorePolicy` (step 3), container storage moves to local NVMe and **the
-> snapshot is bypassed** — you keep paying to build it and get nothing for it.
->
-> arm B はスナップショットから復元したボリューム上にイメージが必要です。
-> `instanceStorePolicy`（ステップ 3）を追加した瞬間、コンテナストレージはローカル
-> NVMe に移り、**スナップショットは参照されません。** 作成コストを払い続けて何も
-> 得られない状態になります。
+この arm では `instanceStorePolicy` を設定しません。arm B はスナップショットから復元した
+ボリューム上にイメージがあることを前提としています。`instanceStorePolicy`（ステップ 3）を
+設定するとコンテナストレージはローカル NVMe に移り、復元したボリュームは使われません。
+スナップショットの作成と維持は続きますが、pull には影響しなくなります。
 
 ---
 
 ## Apply and run / 適用と実行
 
 ```bash
-bin/prep.sh                       # picks up the snapshot ID
-bin/show_config.sh arm-b-snapshot # shows the one-line diff
+bin/prep.sh                       # reads the snapshot ID
+bin/show_config.sh arm-b-snapshot # shows the one-line difference
 bin/bench.sh arm-b-snapshot
 ```
 
-The pull stage should be absent from the breakdown.
+The breakdown should contain no image pull stage.
 
-内訳から pull の段が消えるはずです。
+内訳にイメージ pull の段階が現れないはずです。
 
 ---
 
@@ -139,42 +138,39 @@ The pull stage should be absent from the breakdown.
 bin/verify_config.sh arm-b-snapshot
 ```
 
-Two independent proofs / 独立した 2 つの証明:
+Two checks / 確認は 2 つ:
 
-1. **The volume really came from your snapshot.** It reads the instance's
-   `/dev/xvdb` volume and compares its `SnapshotId` with
-   `results/snapshot-id.txt`. This is stronger than any timing number.
-   **ボリュームが本当にそのスナップショット由来か。** インスタンスの `/dev/xvdb` の
-   `SnapshotId` を `results/snapshot-id.txt` と照合します。どんな時間の数字より強い証拠です。
-2. **kubelet skipped the pull.** It looks for the event
-   `Container image "..." already present on machine`. The registry was never
-   contacted.
-   **kubelet が pull を省略したか。**`already present on machine` イベントを確認します。
-   レジストリには一度も行っていません。
+1. The volume was restored from the expected snapshot. The script reads the instance's
+   `/dev/xvdb` volume and compares its `SnapshotId` with `results/snapshot-id.txt`.
+   ボリュームが想定のスナップショットから復元されたか。インスタンスの `/dev/xvdb` の
+   `SnapshotId` を `results/snapshot-id.txt` と比較します。
+2. kubelet did not pull the image. The script looks for the event
+   `Container image "..." already present on machine`.
+   kubelet が pull しなかったか。`already present on machine` イベントを確認します。
 
 ---
 
-## What you should conclude / ここで得る結論
+## What the figures show / 数字から分かること
 
-- **The pull can be reduced to zero.** In the reference run 125s → 50s.
-  **pull はゼロにできます。** 参考計測では 125 → 50 秒。
-- **The cost is not in the table.** Building the snapshot took minutes, and it must
-  be rebuilt on **every image change**. That recurring cost — not the measured gain —
-  is what decides whether to adopt this.
-  **コストは表に出ていません。** 作成に数分かかり、**イメージ更新ごとに**作り直しが
-  必要です。採用可否を決めるのは実測の短縮幅ではなく、この繰り返し発生するコストです。
-- **This mechanism is unavailable on EKS Auto Mode** (step 4). If it turns out to be
-  the right answer for a workload, that workload cannot go on Auto Mode.
-  **この方式は EKS Auto Mode では使えません**（ステップ 4）。あるワークロードの答えが
-  これなら、そのワークロードは Auto Mode に乗りません。
+- Start-to-Ready was 50 seconds in the reference run, compared with 125 seconds for
+  step 1.
+  start-to-Ready は参考計測で 50 秒でした。ステップ 1 は 125 秒です。
+- The snapshot build time is not included in that figure. It took several minutes, and
+  it has to be repeated whenever the image changes. That recurring cost is the main
+  factor in deciding whether to use this mechanism.
+  スナップショットの作成時間はこの数字に含まれていません。数分かかり、イメージが変わる
+  たびに繰り返す必要があります。この継続的なコストが、この方式を採用するかの主な判断材料に
+  なります。
+- This mechanism is not available on EKS Auto Mode (step 4).
+  この方式は EKS Auto Mode では使えません（ステップ 4）。
 
 ### Common failures / よくある失敗
 
 | Symptom | Cause |
 |---|---|
-| Pod Pending, node class missing<br>Pod が Pending | No `results/snapshot-id.txt`; `prep.sh` skipped arm B<br>スナップショット未作成で `prep.sh` が arm B を飛ばした |
-| Node fails to launch<br>ノードが起動しない | `volumeSize` smaller than the snapshot<br>`volumeSize` がスナップショットより小さい |
-| Image pulled anyway<br>結局 pull される | Snapshot taken from an NVMe arm (empty volume), or a different image than the one under test<br>NVMe の arm から取った（空）か、テスト対象と別イメージ |
+| Pod stays Pending; the node class is missing<br>Pod が Pending のまま、node class が無い | `results/snapshot-id.txt` does not exist, so `prep.sh` skipped arm B<br>`results/snapshot-id.txt` が無く、`prep.sh` が arm B を飛ばした |
+| The node fails to launch<br>ノードが起動しない | `volumeSize` is smaller than the snapshot<br>`volumeSize` がスナップショットより小さい |
+| The image is pulled anyway<br>結果的に pull される | The snapshot was taken from an NVMe arm, so it is empty; or it contains a different image than the one being tested<br>NVMe の arm から取得したため空、またはテスト対象と別のイメージが入っている |
 
 ---
 

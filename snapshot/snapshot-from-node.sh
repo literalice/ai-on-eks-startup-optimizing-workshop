@@ -11,9 +11,8 @@
 # us -- public subnet, public IP, instance profile all correct -- and the script sat
 # at "Launching SSM" indefinitely with no timeout.
 #
-# Using a node the workshop already produced is faster and strictly more faithful:
-# the cached layers were written by the same containerd and OS version that will
-# later consume them, rather than by a separately built instance that might differ.
+# Using a node the workshop already produced is faster, and the cached layers are
+# written by the same containerd and OS version that will later read them.
 #
 # Requirements: an arm A (or any non-NVMe) node must be up with the image pulled.
 # Arm C is not a valid source -- instanceStorePolicy moves container storage to
@@ -58,10 +57,10 @@ if [[ -z "${VOLUME_ID}" || "${VOLUME_ID}" == "None" ]]; then
 fi
 echo "    volume ${VOLUME_ID}"
 
-# Snapshotting a live, mounted volume. containerd may be mid-write, which for a
-# read-only image cache is acceptable: worst case a partially written layer is
-# discarded and re-pulled. Stopping the node first would be cleaner but would mean
-# draining and replacing it, and the point of the exercise is the cached layers.
+# Snapshotting a live, mounted volume. containerd may be mid-write. For a read-only
+# image cache the effect is limited: a partially written layer is discarded and
+# re-pulled. Stopping the node first would avoid that, but would require draining
+# and replacing the node.
 echo "==> creating snapshot"
 SNAPSHOT_ID="$(aws ec2 create-snapshot \
   --region "${REGION}" \

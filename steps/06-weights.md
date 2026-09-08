@@ -1,49 +1,49 @@
 # Step 6 — How the model weights reach GPU memory
 # ステップ 6 — モデルウェイトが GPU メモリに届く経路
 
-**Goal / 目的:** once the image stops being the bottleneck, find out what is. Includes
-Run:ai Model Streamer and time to first token.
+**Goal / 目的:** measure what determines startup time once the image pull is no longer
+the largest stage. Includes Run:ai Model Streamer and time to first token.
 
-イメージがボトルネックでなくなった後、何がボトルネックかを調べます。Run:ai Model
+イメージ pull が最大の段階でなくなった後、起動時間を決めるものを計測します。Run:ai Model
 Streamer と time to first token を含みます。
 
 ---
 
-## Pre-work / 事前準備
+## Preparation / 事前準備
 
 ```bash
 # put MODEL_BUCKET from `terraform output -raw model_bucket` into config.env
 snapshot/stage-model.sh
 ```
 
-Downloads the model from Hugging Face and uploads it to S3. Safetensors only —
-`--exclude "*.bin"` skips the duplicate older-format weights.
+This downloads the model from Hugging Face and uploads it to S3, excluding the
+`.bin` files, which are the same weights in an older format.
 
-Hugging Face からモデルを取得し S3 へアップロードします。safetensors のみで、
-`--exclude "*.bin"` により旧形式の重複ウェイトを除外します。
+Hugging Face からモデルを取得して S3 にアップロードします。`.bin` ファイルは同じ
+ウェイトの旧形式なので除外します。
 
-> **One `--exclude` per pattern.** The flag takes a single value; stacking several
-> values after one flag makes the CLI read them as *filenames to download*. It then
-> prints "Ignoring `--exclude` since filenames have being explicitly set", **exits 0,
-> and downloads nothing** — a silent no-op that looks like success.
+> Use one `--exclude` flag per pattern. The flag takes a single value. If several
+> values follow one flag, the CLI treats them as filenames to download, prints
+> "Ignoring `--exclude` since filenames have being explicitly set", exits with status 0
+> and downloads nothing.
 >
-> **`--exclude` は 1 パターンにつき 1 フラグです。** 値を複数並べると CLI はそれらを
-> *ダウンロード対象のファイル名*と解釈します。その結果
-> "Ignoring `--exclude` since filenames have being explicitly set" を表示し、
-> **exit 0 で何もダウンロードしません。** 成功に見える無音の no-op です。
+> `--exclude` は 1 パターンごとに 1 つ指定してください。このフラグは値を 1 つ取ります。
+> 1 つのフラグの後に値を複数並べると、CLI はそれらをダウンロード対象のファイル名として
+> 扱い、"Ignoring `--exclude` since filenames have being explicitly set" を出力し、
+> 終了ステータス 0 で何もダウンロードしません。
 
 ---
 
-## The three variants / 3 通り
+## The three variants / 3 通りの構成
 
-Same pod spec, same node, same model, same bytes. **Only the vLLM arguments differ.**
-There are three rather than two because **the effect splits into two independent
-parts**.
+The pod spec, node, model and bytes are the same in all three. The vLLM arguments
+differ. There are three rather than two because the loader and the delivery method are
+separate variables.
 
-Pod spec・ノード・モデル・バイト列は同一で、**変えるのは vLLM の引数だけ**です。
-2 つでなく 3 つあるのは、**効果が独立した 2 つに分かれる**からです。
+Pod spec、ノード、モデル、バイト列は 3 つとも同じで、vLLM の引数が異なります。3 つある
+のは、ローダーと配送方法が別々の変数だからです。
 
-### Variant 1 — `s3-initcontainer` (the obvious implementation)
+### Variant 1 — `s3-initcontainer`
 
 ```yaml
   initContainers:
@@ -63,7 +63,7 @@ Pod spec・ノード・モデル・バイト列は同一で、**変えるのは 
       args: ["... --model /models ..."]        # vLLM's default safetensors loader
 ```
 
-### Variant 2 — `runai-local` (change ONLY the loader)
+### Variant 2 — `runai-local` (the loader differs from variant 1)
 
 ```yaml
   initContainers: <unchanged>
@@ -78,10 +78,10 @@ Pod spec・ノード・モデル・バイト列は同一で、**変えるのは 
             ...
 ```
 
-### Variant 3 — `runai-s3` (change ONLY the delivery)
+### Variant 3 — `runai-s3` (the delivery differs from variant 2)
 
 ```yaml
-  # initContainers: REMOVED ENTIRELY
+  # no initContainers
   containers:
     - name: vllm
       args:
@@ -93,60 +93,58 @@ Pod spec・ノード・モデル・バイト列は同一で、**変えるのは 
             ...
 ```
 
-| Comparison | Isolates / 切り分けるもの |
+| Comparison | What it isolates / 切り分ける対象 |
 |---|---|
-| 1 → 2 | **The loader only.** Identical bytes on identical disk, so the difference is what concurrent tensor streaming is worth on its own.<br>**ローダーのみ。** 同じディスクの同じバイト列なので、差は並列テンソルストリーミング単体の効果です。 |
-| 2 → 3 | **The delivery only.** The copy step disappears.<br>**配送のみ。** コピー工程が消えます。 |
+| 1 to 2 | The loader. The bytes and the disk are the same, so the difference is the effect of concurrent tensor streaming.<br>ローダー。バイト列とディスクは同じなので、差は並列テンソルストリーミングの効果です。 |
+| 2 to 3 | The delivery. The copy step is removed.<br>配送。コピー工程が無くなります。 |
 
-**Reporting them separately is what stops one effect being credited to the other.**
+Reporting the two comparisons separately shows which of the two changes produced any
+difference in the total.
 
-**別々に報告することが、一方の効果をもう一方の功績にしないための仕組みです。**
+2 つの比較を別に報告することで、合計の差がどちらの変更によるものかが分かります。
 
 ---
 
-## Two things that will bite you / 必ず踏む 2 点
+## Two configuration details / 設定上の 2 点
 
-### 1. Credentials: use Pod Identity, not the node role
+### 1. Credentials come from Pod Identity
 
 ```yaml
 spec:
   serviceAccountName: bench     # bound to an IAM role by EKS Pod Identity
 ```
 
-Karpenter sets the IMDS **hop limit to 1**, so a container cannot reach instance
-metadata at all. Using the node role fails with `Unable to locate credentials`.
-
-Karpenter は IMDS の **hop limit を 1** にするため、コンテナはインスタンスメタデータに
-到達できません。ノードロールを使うと `Unable to locate credentials` で失敗します。
-
-**That default is correct — keep it.** Pods should not silently inherit node
-permissions. Scoping a role to one service account is both the thing that works and
-the thing to do in production. See `aws_eks_pod_identity_association` in
+Karpenter sets the IMDS hop limit to 1, so a container cannot reach instance metadata.
+Using the node role results in `Unable to locate credentials`. The hop limit prevents
+pods from using node permissions, and binding a role to a service account is the
+approach to use in production. See `aws_eks_pod_identity_association` in
 [`terraform/main.tf`](../terraform/main.tf).
 
-**この既定は正しいので維持してください。** Pod がノードの権限を暗黙に継承すべきでは
-ありません。サービスアカウント単位でロールを絞ることが、動く方法であり本番でも正しい方法です。
+Karpenter は IMDS の hop limit を 1 に設定するため、コンテナはインスタンスメタデータに
+到達できません。ノードロールを使うと `Unable to locate credentials` になります。この
+hop limit は Pod がノードの権限を使うことを防ぐもので、サービスアカウントにロールを紐付ける
+方法は本番でも使えます。
 
-### 2. The init container serialises ahead of the image pull
+### 2. The init container runs before the image pull
 
-kubelet pulls the init image, runs the init container, and **only then** pulls the
-workload image. The copy and the image pull are **not overlapped**.
+kubelet pulls the init image, runs the init container, and then pulls the workload
+image. The copy and the image pull do not overlap.
 
-kubelet は init イメージを pull し、init コンテナを実行し、**その後で**本体イメージを
-pull します。コピーと pull は**重なりません**。
+kubelet は init イメージを pull し、init コンテナを実行し、その後で本体イメージを pull
+します。コピーと pull は重なりません。
 
-**So moving weights out of the image can push start-to-Ready up even though the image
-got smaller.** Variant 3 deletes that step rather than optimising it.
+Because of this, moving weights out of the image can increase start-to-Ready time even
+though the image is smaller. Variant 3 removes the copy step.
 
-**つまりイメージからウェイトを出しても、イメージが小さくなったのに start-to-Ready が
-伸びることがあります。** variant 3 はこの工程を最適化するのではなく削除します。
+このため、イメージからウェイトを出してイメージが小さくなっても start-to-Ready が伸びる
+場合があります。variant 3 はコピー工程を無くします。
 
 ---
 
 ## Apply and run / 適用と実行
 
 ```bash
-bin/check_runai.sh                          # confirm the image can do it at all
+bin/check_runai.sh                          # checks the image supports it
 bin/show_config.sh weights
 bin/bench.sh weights s3-initcontainer
 bin/bench.sh weights runai-local
@@ -154,14 +152,14 @@ bin/bench.sh weights runai-s3
 bin/report.py
 ```
 
-`runai-streamer` and its S3 backend **already ship in the AWS vLLM Deep Learning
-Container base image** — Apache-2.0, nothing to install, no licence to buy.
-`check_runai.sh` verifies it in the tag you actually configured, on a node that
-already has the image.
+`runai-streamer` and its S3 backend are included in the AWS vLLM Deep Learning
+Container base image. It is Apache-2.0 licensed, so no installation or licence is
+required. `check_runai.sh` checks the tag you configured, using a node that already has
+the image.
 
-`runai-streamer` とその S3 バックエンドは **AWS vLLM Deep Learning Container の
-ベースイメージに既に含まれています**（Apache-2.0、インストール不要、ライセンス購入不要）。
-`check_runai.sh` は、実際に設定したタグについて、イメージを持つノード上で確認します。
+`runai-streamer` とその S3 バックエンドは AWS vLLM Deep Learning Container のベース
+イメージに含まれています。Apache-2.0 ライセンスで、インストールもライセンス取得も不要です。
+`check_runai.sh` は、イメージを持っているノードを使って、設定したタグを確認します。
 
 ---
 
@@ -171,28 +169,27 @@ already has the image.
 bin/verify_config.sh weights
 ```
 
-It reads back which loader the pod actually started with, whether the model came from
-`/models` or straight from `s3://`, **and the timing breakdown from vLLM's own log** —
-which is the part that makes this step answerable.
+This reports which loader the pod started with, whether the model was read from
+`/models` or from `s3://`, and the startup timings from vLLM's log.
 
-Pod が実際にどのローダーで起動したか、モデルが `/models` からか `s3://` 直かを読み戻し、
-**さらに vLLM 自身のログから内訳**を出します。この内訳がこのステップを答えの出るものに
-しています。
+Pod がどのローダーで起動したか、モデルを `/models` から読んだか `s3://` から読んだか、
+および vLLM のログに出ている起動時間の内訳を報告します。
 
 ---
 
-## What you should conclude / ここで得る結論
+## What the figures show / 数字から分かること
 
-The reference run produced a result that **contradicts the obvious expectation**, and
-it is the most useful thing in this step.
+| Variant | Ready | TTFT after Ready | Submit to first token |
+|---|---:|---:|---:|
+| `s3-initcontainer` | 96s | 0.65s | 96.6s |
+| `runai-local` | 93s | 0.65s | 93.6s |
+| `runai-s3` | 82s | 0.65s | 82.6s |
 
-参考計測は**素朴な期待に反する結果**を出しました。そしてそれがこのステップで最も有用な点です。
+### Changing the loader did not change the total
 
-### Changing only the loader achieved nothing / ローダーだけの変更では何も起きなかった
+Variants 1 and 2 produced the same total. vLLM's log gives the reason:
 
-Variant 1 → 2 did not move the total. The reason is in vLLM's log:
-
-variant 1 → 2 で合計は動きませんでした。理由は vLLM のログにあります。
+variant 1 と 2 の合計は同じでした。理由は vLLM のログに出ています。
 
 ```
 Loading weights took 0.31 seconds
@@ -201,77 +198,70 @@ init engine (profile, create kv cache, warmup) took 28.2 s
 Graph capturing finished in 4 secs
 ```
 
-**Reading the weights was 0.31 seconds out of 96.** A faster way of reading them had
-nothing to win.
+Reading the weights took 0.31 seconds out of 96. A loader that reads them faster can
+only affect that 0.31 seconds. Without these log lines the comparison would show only
+that the total did not change, which does not indicate whether the loader was slow or
+whether reading the weights was already a small part of the startup time.
 
-**ウェイトの読み込みは 96 秒中 0.31 秒でした。** 速く読む手段に取り分がありませんでした。
+ウェイトの読み込みは 96 秒中 0.31 秒でした。より速く読むローダーが影響できるのはこの
+0.31 秒だけです。このログが無ければ、比較から分かるのは合計が変わらなかったことだけで、
+ローダーが遅いのか、ウェイト読み込みが元から起動時間のごく一部なのかは判別できません。
 
-> Shown as a before-and-after total alone, this would have read as "the tool does not
-> work". The vLLM timings show it was **never given anything to do.** That distinction
-> is worth more than a win would have been — it tells you *when* the tool would help.
->
-> 前後の合計だけを見せていたら「このツールは効かない」と読めます。vLLM の内訳は
-> **そもそも仕事が与えられていなかった**ことを示します。この区別は改善が出るより価値が
-> あります。ツールが*いつ*効くのかが分かるからです。
+### Changing the delivery reduced the total
 
-### Changing the delivery did work, for a specific reason / 配送の変更は効いた、理由は明確
+Variant 3 removed the init container and the total went from 96 to 82 seconds. The model
+load time increased from 0.63 to 3.36 seconds, so reading from S3 is slower per tensor
+than reading from local disk. The reduction comes from removing the copy step, which
+took about 10 seconds.
 
-Variant 3 removed the init container: 96s → 82s. But note the model load went **up**,
-0.63s → 3.36s — streaming from S3 is slower *per tensor* than reading local disk.
+variant 3 は init コンテナを無くし、合計は 96 秒から 82 秒になりました。モデルロード時間は
+0.63 秒から 3.36 秒に増えており、S3 からの読み込みはテンソル単位ではローカルディスクより
+遅くなっています。短縮分は、約 10 秒かかっていたコピー工程が無くなったことによります。
 
-variant 3 は init コンテナを削除し 96 → 82 秒。ただしモデルロードは 0.63 → 3.36 秒と
-**増えています**。S3 ストリーミングはテンソル単位ではローカルディスクより遅いのです。
+### Compilation and warmup were the largest components
 
-**The gain is from deleting a step, not from doing it faster.**
+`torch.compile` at 14.7 seconds, engine init at 27.9 seconds and graph capture at 4
+seconds account for about 47 of the 82 seconds. Neither the loader nor the delivery
+method affects these. Caching compiled artifacts would.
 
-**短縮の出所は工程の削除であり、高速化ではありません。**
+`torch.compile` が 14.7 秒、engine init が 27.9 秒、graph capture が 4 秒で、82 秒のうち
+約 47 秒を占めます。ローダーも配送方法もこれには影響しません。影響するのはコンパイル
+成果物のキャッシュです。
 
-### At this model size, compilation dominates / このサイズではコンパイルが支配的
+### At a larger model size / モデルが大きい場合
 
-`torch.compile` 14.7s + engine init 27.9s + graph capture 4s ≈ 47 of the 82 seconds.
-**Neither a faster loader nor faster delivery touches any of that** — caching compiled
-artifacts would.
+The model used here is 1.5B parameters, about 2.9 GB. Run:ai's published benchmarks use
+a 15 GB model, where the loader accounts for a larger share of the startup time. Set
+`MODEL_HF_REPO` in `config.env` to a larger model to measure that case. If the models
+you run are large, the result may differ from the one above.
 
-`torch.compile` 14.7 秒 + engine init 27.9 秒 + graph capture 4 秒で、82 秒のうち約 47 秒。
-**ローダーの高速化も配送の変更もここには触れません。** 効くのはコンパイル成果物の
-キャッシュです。
-
-### On a larger model this changes / 大きいモデルでは変わる
-
-A 1.5B model is roughly a tenth of the 15 GB models Run:ai's own published benchmarks
-use, where the loader does matter substantially. **Raise `MODEL_HF_REPO` in
-`config.env` if you want to see the loader effect** — and if your real models are
-large, expect your conclusion to differ from the reference run's.
-
-1.5B モデルは Run:ai の公開ベンチマークが使う 15 GB 級の約 1/10 で、そちらではローダーが
-明確に効きます。**ローダーの効果を見たい場合は `config.env` の `MODEL_HF_REPO` を
-上げてください。** 実際のモデルが大きい場合、結論は参考計測と異なると想定してください。
+ここで使うモデルは 1.5B パラメータ、約 2.9 GB です。Run:ai の公開ベンチマークは 15 GB の
+モデルを使っており、そちらではローダーが起動時間に占める割合が大きくなります。その場合を
+計測するには `config.env` の `MODEL_HF_REPO` を大きいモデルに設定してください。運用する
+モデルが大きい場合、結果は上記と異なる可能性があります。
 
 ---
 
 ## Time to first token / TTFT
 
-`Ready` only means vLLM answers `/health`. It does not mean the server will produce a
-token promptly. Each phase-2 run therefore also measures **submit to first token**:
+A pod reaching Ready means vLLM responds to `/health`. It does not indicate how soon the
+server produces a token. Each phase 2 run also measures the interval from submit to
+first token.
 
-`Ready` は vLLM が `/health` に応答することしか意味せず、速やかにトークンを出せることは
-意味しません。そのため各実行では **submit から最初のトークンまで**も計測します。
+Pod が Ready になることは vLLM が `/health` に応答することを意味し、トークンをどれだけ
+早く出せるかは示しません。フェーズ 2 の各実行では submit から最初のトークンまでも計測
+します。
 
-```
-  time to first token after Ready  0.65s
-  submit to first token            82.6s   <- the number a user would feel
-```
+The probe ([`bin/first_token.py`](../bin/first_token.py)) requests a streamed completion
+and stops timing at the first token containing text. Streaming is used because without
+it the measurable interval is total latency, which depends on the number of tokens
+requested. The probe runs inside the pod, loaded as a ConfigMap, so it does not require
+a port-forward or `curl` in the image.
 
-The probe ([`bin/first_token.py`](../bin/first_token.py)) streams a completion and
-stops the clock on the first token carrying text. **Streaming matters:** without it the
-only measurable thing is total latency, which is dominated by how many tokens you
-asked for. It runs *inside* the pod via a ConfigMap, so there is no port-forward to be
-flaky and no assumption about `curl` being in the image.
-
-プローブはストリーミングで補完を要求し、テキストを含む最初のトークンで時計を止めます。
-**ストリーミングが重要です。** 使わないと計測できるのは総レイテンシだけで、それは要求
-トークン数に支配されます。ConfigMap 経由で Pod の**内側**で動くため、不安定な
-port-forward も `curl` がイメージにある前提も不要です。
+プローブ（[`bin/first_token.py`](../bin/first_token.py)）はストリーミングで補完を要求し、
+テキストを含む最初のトークンで計測を止めます。ストリーミングを使うのは、使わない場合に
+計測できるのが総レイテンシで、要求トークン数に依存するためです。プローブは ConfigMap として
+Pod 内で動くため、port-forward もイメージ内の `curl` も不要です。
 
 ---
 

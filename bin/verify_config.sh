@@ -8,8 +8,8 @@
 # the mechanism directly: that the volume really came from the snapshot, that
 # container storage really moved to NVMe, that the settings really reached the node.
 #
-# Each check states what it proves AND what it does not. An overclaimed check is
-# worse than no check, because it retires a question that is still open.
+# Each check states what it confirms and what it does not, so that a check is not
+# read as covering more than it does.
 #
 # Run it after the arm, while the node is still up.
 
@@ -26,14 +26,13 @@ ARM="${1:-}"
 BOLD=$'\033[1m'; DIM=$'\033[2m'; CYAN=$'\033[36m'
 GREEN=$'\033[32m'; YELLOW=$'\033[33m'; RED=$'\033[31m'; RESET=$'\033[0m'
 
-# A rehearsal has no cluster and no AWS account. Every check here reads real state --
-# the volume a node actually booted from, the capacity a node actually reports -- so
-# simulating them would produce fake proof, which is worse than none: the whole
-# purpose of this script is to be the thing you cannot fake.
+# A rehearsal has no cluster and no AWS account. Every check here reads real state:
+# the volume a node booted from, the capacity a node reports. Returning fixture
+# values for those would report a configuration as confirmed without checking it.
 if [[ -n "${REHEARSAL_DIR:-}" ]]; then
   printf '\n%s  Verification is skipped in a rehearsal.%s\n' "${BOLD}${YELLOW}" "${RESET}"
-  printf '  Every check here reads real cluster and EC2 state. Simulating it would be\n'
-  printf '  fake proof, and being unfakeable is the point of this script.\n'
+  printf '  Every check here reads real cluster and EC2 state. Fixture values would\n'
+  printf '  report a configuration as confirmed without checking it.\n'
   printf '  Run it against a real cluster after %s.\n\n' "bin/bench.sh ${ARM:-<arm>}"
   exit 0
 fi

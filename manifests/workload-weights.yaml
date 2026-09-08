@@ -65,7 +65,7 @@ spec:
       emptyDir:
         medium: Memory
         sizeLimit: 4Gi
-@INIT_CONTAINERS@
+  # @INIT_CONTAINERS@
   containers:
     - name: vllm
       image: "@IMAGE@"
