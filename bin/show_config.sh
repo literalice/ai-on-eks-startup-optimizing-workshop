@@ -107,8 +107,10 @@ case "${VARIANT}" in
     plain "    restored volume is then unused."
     plain ""
     plain "  Where the snapshot comes from:"
-    plain "    bin/bench.sh baseline        # leaves a node with the image pulled"
-    plain "    snapshot/snapshot-from-node.sh     # snapshots that node's /dev/xvdb"
+    plain "    IMAGE=<image> snapshot/build-snapshot.sh"
+    plain "    A builder instance pulls the image, is stopped, and its /dev/xvdb is"
+    plain "    snapshotted. Stopped, so the snapshot is consistent; a dedicated"
+    plain "    instance, so it holds only that image."
     plain ""
     if [[ -f "${ROOT}/results/snapshot-id.txt" ]]; then
       why "current snapshot: $(tr -d '[:space:]' < "${ROOT}/results/snapshot-id.txt")"

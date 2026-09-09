@@ -33,7 +33,7 @@ Compared with step 3, the following are absent:
 
 | Absent | What still happens |
 |---|---|
-| `instanceStorePolicy: RAID0` | The NVMe is formatted, using RAID 0 across multiple drives, and container storage is placed on it. |
+| `instanceStorePolicy: RAID0` | The instance store is formatted and container storage is placed on it, striped across the disks when the instance type has more than one. |
 | The `userData` TOML block | Image pull and unpack run in parallel on GPU instances. |
 | `blockDeviceMappings` | Auto Mode determines the volume configuration. |
 | `amiSelectorTerms` | Auto Mode selects and updates the AMI. |
@@ -50,8 +50,10 @@ than the instance's local NVMe capacity, Auto Mode attaches a 20 GiB EBS volume 
 ephemeral container data on the NVMe. When the value equals or exceeds NVMe capacity, Auto
 Mode does not attach the EBS volume and makes the NVMe available to the workload instead.
 
-On `g6.4xlarge` the NVMe is 600 GB, so `80Gi` is below it. If you change the instance type,
-check this value again, because it determines where container storage is placed.
+On `g6.8xlarge` the instance store is 900 GB across two disks, so `80Gi` is below it. If you
+change the instance type, check this value again, because it determines where container
+storage is placed. Note that the comparison is against the instance store's total capacity,
+not one disk's.
 
 ### The API group
 
@@ -155,7 +157,7 @@ spec:
 
 | 無いもの | それでも行われること |
 |---|---|
-| `instanceStorePolicy: RAID0` | NVMe がフォーマットされ（複数本の場合は RAID 0）、コンテナストレージが配置されます。 |
+| `instanceStorePolicy: RAID0` | インスタンスストアがフォーマットされ、コンテナストレージが配置されます。ディスクが複数本のタイプではストライピングされます。 |
 | `userData` の TOML ブロック | GPU インスタンスでイメージの pull と展開が並列で実行されます。 |
 | `blockDeviceMappings` | Auto Mode がボリューム構成を決めます。 |
 | `amiSelectorTerms` | Auto Mode が AMI を選定・更新します。 |
@@ -172,8 +174,9 @@ spec:
 コンテナデータを NVMe に置きます。NVMe 容量以上の値にすると、EBS ボリュームを付けず、NVMe を
 ワークロードに割り当てます。
 
-`g6.4xlarge` の NVMe は 600 GB なので `80Gi` はそれより小さい値です。インスタンスタイプを
-変更する場合は、この値を再確認してください。コンテナストレージの配置先を決める設定です。
+`g6.8xlarge` のインスタンスストアは 2 本合計 900 GB なので `80Gi` はそれより小さい値です。
+インスタンスタイプを変更する場合は、この値を再確認してください。コンテナストレージの配置先を
+決める設定です。比較対象はインスタンスストアの合計容量で、1 本の容量ではありません。
 
 ### API グループ
 

@@ -35,7 +35,7 @@ for f in "${ROOT}"/manifests/karpenter/*.yaml "${ROOT}"/manifests/automode/*.yam
       -e "s|@KARPENTER_NODE_IAM_ROLE_NAME@|br-startup-karpenter|g" \
       -e "s|@GPU_INSTANCE_FAMILY@|g6|g" \
       -e "s|@GPU_INSTANCE_SIZE@|4xlarge|g" \
-      -e "s|@GPU_INSTANCE_TYPE@|g6.4xlarge|g" \
+      -e "s|@GPU_INSTANCE_TYPE@|g6.8xlarge|g" \
       -e "s|@SNAPSHOT_ID@|snap-0f3c9a1e7b2d84c5f|g" \
       -e "s|@CLUSTER_NAME@|br-startup-karpenter|g" \
       -e "s|@NODE_IAM_ROLE@|br-startup-automode-eks-auto|g" \

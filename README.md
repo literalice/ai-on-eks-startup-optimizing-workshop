@@ -109,9 +109,9 @@ instance type, region and registry conditions, so your figures will differ.
 
 - `aws`, `kubectl`, `terraform`, `jq`, `python3`
 - Credentials for an account in which you can create two EKS clusters
-- **GPU quota.** All variants use one instance type, `g6.4xlarge`, which is 16 vCPU.
-  Running them one at a time needs 16 vCPU of *Running On-Demand G and VT instances*.
-  Requesting 64 leaves room for re-runs.
+- **GPU quota.** All variants use one instance type, `g6.8xlarge`, which is 32 vCPU.
+  Running them one at a time needs 32 vCPU of *Running On-Demand G and VT instances*.
+  Requesting 128 leaves room for re-runs.
   ```bash
   aws service-quotas get-service-quota --service-code ec2 \
     --quota-code L-DB2E81BA --region us-west-2
@@ -126,14 +126,34 @@ even when no GPU nodes are running, so run the teardown when you have finished.
 
 ### Why the instance type matters
 
-`g6.4xlarge` has one L4 GPU, 16 vCPU, 600 GB of local NVMe, and up to 25 Gbps of network
-bandwidth.
+`g6.8xlarge` has one L4 GPU (24 GB), 32 vCPU, two 450 GB NVMe disks, and up to 25 Gbps of
+network bandwidth. Three properties of it affect the result.
 
-Local NVMe is required, because `soci` and `automode` both use it. The vCPU count
-affects the result as well: SOCI's parallel unpack is CPU-bound, so a `2xlarge` produces
-a smaller improvement and an `8xlarge` a larger one than a typical inference node would.
-Set `GPU_INSTANCE_TYPE` in `config.env` to the type you use, and expect the `soci`
-figure to change with it.
+**Local NVMe is required**, because `soci` and `automode` both use it. A GPU type without
+instance store makes both of those variants measure the same thing as `baseline`.
+
+**Two disks rather than one**, so `instanceStorePolicy: RAID0` actually stripes.
+Bottlerocket skips the array when there is only one disk, which is the case on `g6.4xlarge`
+and most of the smaller G types: the policy still moves container storage to the instance
+store, but nothing is striped. Check the count for your own type before reading anything
+into a throughput figure.
+
+```bash
+aws ec2 describe-instance-types --instance-types "$GPU_INSTANCE_TYPE" \
+  --query 'InstanceTypes[0].InstanceStorageInfo.Disks'
+```
+
+**The vCPU count**, because SOCI's parallel unpack is CPU-bound. A `2xlarge` produces a
+smaller improvement and a `12xlarge` a larger one than a typical inference node would.
+
+Set `GPU_INSTANCE_TYPE` in `config.env` to the type you use, and expect the `soci` figure to
+change with it. Also check that the type has capacity before a run, because a
+capacity-starved offering is held unavailable by Karpenter for 3 minutes at a time and that
+wait lands in the variant's total:
+
+```bash
+bin/check_capacity.sh
+```
 
 ---
 
@@ -195,27 +215,28 @@ pod reaching Ready indicates the GPU is available to the container.
 
 ### 3. Build the snapshot
 
-Run `baseline` first and do not reset afterwards, then snapshot that node's data volume:
+Build it with a dedicated builder instance:
 
 ```bash
-./bin/bench.sh baseline              # leaves a node with the image cached
-./snapshot/snapshot-from-node.sh     # takes 3-5 minutes
+IMAGE="$(grep WORKLOAD_IMAGE config.env | cut -d'"' -f2)" ./snapshot/build-snapshot.sh
 ```
 
-The snapshot ID is written to `results/snapshot-id.txt`, and `bin/prep.sh` reads it from
-there.
+This takes 10-20 minutes for a multi-GB image, so run it the day before rather than live.
+The snapshot ID is written to `results/snapshot-id.txt` and to an SSM parameter, and
+`bin/prep.sh` reads it from there.
 
-> `snapshot/build-snapshot.sh` did not work in our environment. It wraps
-> [`aws-samples/bottlerocket-images-cache`][cache], which launches its own Bottlerocket
-> instance and controls it through SSM Run Command. On the EKS-optimized Bottlerocket
-> NVIDIA AMI the instance did not register with SSM, and the script has no timeout, so it
-> stopped at "Launching SSM". The subnet, public IP and instance profile were all
-> configured correctly. The script is kept for reference.
+> The builder stops `kubelet`, removes every image already present, pulls only the images you
+> named, then **stops the instance** before snapshotting. That is what makes the snapshot
+> filesystem-consistent and free of anything you did not ask for, and it is why this is the
+> method to use in your own environment. The volume size is a parameter, so the snapshot is
+> sized for the images rather than for some node's data volume, and the whole thing runs from
+> an image tag with no cluster involved.
 >
-> Snapshotting a node from the workshop itself also means the cached layers were written
-> by the same containerd and OS version that will read them later. The node must be a
-> `baseline` node. The `soci` variant's `instanceStorePolicy` moves container storage to
-> local NVMe, so its EBS data volume is empty.
+> `snapshot/snapshot-from-node.sh` snapshots a `baseline` node's data volume instead, in
+> 3-5 minutes. Use it only where a dedicated builder instance is not an option: it snapshots
+> a mounted volume, so the result is crash-consistent, and it carries that node's kubelet
+> state, pod logs and any other image it pulled. See
+> [`steps/02-snapshot.md`](steps/02-snapshot.md) for both.
 
 The time this takes is part of the cost of the `snapshot` variant, and it recurs
 whenever the image changes. Compare it against that variant's measured improvement in
@@ -486,7 +507,6 @@ manifests/
   rendered/                       generated by prep.sh; what was applied
 snapshot/
   snapshot-from-node.sh           snapshot preparation
-  build-snapshot.sh               snapshot preparation via aws-samples (did not work here)
   stage-model.sh                  phase 2 preparation
 bin/
   prep.sh                         render, apply, check versions
@@ -649,8 +669,8 @@ bin/verify_config.sh soci   # 実行後に、効いたことを確認
 
 - `aws`, `kubectl`, `terraform`, `jq`, `python3`
 - EKS クラスターを 2 面作成できるアカウントの認証情報
-- **GPU クォータ。** 全 variant が `g6.4xlarge`（16 vCPU）を使います。逐次実行なら
-  *Running On-Demand G and VT instances* の 16 vCPU で足りますが、64 を申請しておくと
+- **GPU クォータ。** 全 variant が `g6.8xlarge`（32 vCPU）を使います。逐次実行なら
+  *Running On-Demand G and VT instances* の 32 vCPU で足りますが、128 を申請しておくと
   再実行の余地ができます。
   ```bash
   aws service-quotas get-service-quota --service-code ec2 \
@@ -666,13 +686,34 @@ bin/verify_config.sh soci   # 実行後に、効いたことを確認
 
 ### インスタンスタイプについて
 
-`g6.4xlarge` は L4 GPU 1 基、16 vCPU、ローカル NVMe 600 GB、ネットワーク帯域は最大
-25 Gbps です。
+`g6.8xlarge` は L4 GPU 1 基（24 GB）、32 vCPU、450 GB の NVMe が 2 本、ネットワーク帯域は
+最大 25 Gbps です。結果に影響する性質が 3 つあります。
 
-ローカル NVMe は `soci` と `automode` が使うため必須です。vCPU 数も結果に影響します。
-SOCI の並列展開は CPU バウンドなので、`2xlarge` では一般的な推論ノードより改善幅が小さく、
-`8xlarge` では大きく出ます。`config.env` の `GPU_INSTANCE_TYPE` を実際に使う型に設定し、
-`soci` の数字がそれに応じて変わることを前提にしてください。
+**ローカル NVMe は必須**です。`soci` と `automode` が使います。インスタンスストアを持たない
+GPU タイプでは、この 2 つの variant が `baseline` と同じものを計測することになります。
+
+**ディスクが 1 本ではなく 2 本**なので、`instanceStorePolicy: RAID0` が実際にストライピング
+します。Bottlerocket は 1 本の場合アレイを省きます。`g6.4xlarge` や小さめの G 系がこれに
+該当し、ポリシーはコンテナストレージをインスタンスストアに移しますが、ストライピングは
+発生しません。スループットの数字から何かを読み取る前に、自身のタイプの本数を確認して
+ください。
+
+```bash
+aws ec2 describe-instance-types --instance-types "$GPU_INSTANCE_TYPE" \
+  --query 'InstanceTypes[0].InstanceStorageInfo.Disks'
+```
+
+**vCPU 数**も影響します。SOCI の並列展開は CPU バウンドなので、`2xlarge` では一般的な推論
+ノードより改善幅が小さく、`12xlarge` では大きく出ます。
+
+`config.env` の `GPU_INSTANCE_TYPE` を実際に使う型に設定し、`soci` の数字がそれに応じて
+変わることを前提にしてください。実行前に、そのタイプに容量があることも確認してください。
+容量が枯渇した offering は Karpenter が 3 分間 unavailable に保持し、その待ち時間が variant
+の合計に入ります。
+
+```bash
+bin/check_capacity.sh
+```
 
 ---
 
@@ -732,28 +773,27 @@ Ready になればコンテナから GPU が使える状態だと分かります
 
 ### 3. スナップショットの作成
 
-先に `baseline` を実行し、その後 reset せずに、そのノードのデータボリュームを
-スナップショットします。
+専用のビルダーインスタンスで作成します。
 
 ```bash
-./bin/bench.sh baseline              # イメージをキャッシュしたノードが残る
-./snapshot/snapshot-from-node.sh     # 3〜5 分
+IMAGE="$(grep WORKLOAD_IMAGE config.env | cut -d'"' -f2)" ./snapshot/build-snapshot.sh
 ```
 
-スナップショット ID は `results/snapshot-id.txt` に書かれ、`bin/prep.sh` がそこから
+数 GB のイメージで 10〜20 分かかるため、当日ではなく前日に実行してください。スナップショット
+ID は `results/snapshot-id.txt` と SSM パラメータに書かれ、`bin/prep.sh` がそこから
 読み取ります。
 
-> `snapshot/build-snapshot.sh` は当環境では動作しませんでした。
-> [`aws-samples/bottlerocket-images-cache`][cache] のラッパーで、専用の Bottlerocket
-> インスタンスを起動して SSM Run Command で操作します。EKS 最適化 Bottlerocket NVIDIA
-> AMI ではインスタンスが SSM に登録されず、スクリプトにタイムアウトが無いため
-> "Launching SSM" で停止しました。サブネット、パブリック IP、インスタンスプロファイルは
-> いずれも正しく設定されていました。参考として残しています。
+> ビルダーは `kubelet` を停止し、既存イメージをすべて削除し、指定したイメージだけを pull し、
+> **インスタンスを停止してから**スナップショットを取得します。これによりファイルシステムとして
+> 整合し、指定していないものを含まない結果になります。自身の環境で使うべきなのはこちらです。
+> ボリュームサイズはパラメータなので、どこかのノードのデータボリューム容量ではなくイメージに
+> 見合ったサイズになり、クラスターを介さずイメージタグから実行できます。
 >
-> ワークショップ内のノードをスナップショットする方式では、キャッシュされた層を書いた
-> containerd と OS のバージョンが、後で読む側と同じになります。対象は `baseline` の
-> ノードである必要があります。`soci` は `instanceStorePolicy` によりコンテナストレージが
-> ローカル NVMe に移るため、EBS データボリュームは空です。
+> `snapshot/snapshot-from-node.sh` は代わりに `baseline` ノードのデータボリュームを 3〜5 分で
+> スナップショットします。専用ビルダーが選択できない場合に限って使ってください。マウント中の
+> ボリュームを取得するためクラッシュ整合であり、そのノードの kubelet state、Pod ログ、pull 済みの
+> 他のイメージも含まれます。両方の詳細は
+> [`steps/02-snapshot.md`](steps/02-snapshot.md) にあります。
 
 この所要時間は `snapshot` variant のコストの一部で、イメージが変わるたびに発生します。
 最終セクションで、その variant の実測改善幅と比較してください。
@@ -1011,7 +1051,6 @@ manifests/
   rendered/                       prep.sh が生成。実際に適用した内容
 snapshot/
   snapshot-from-node.sh           snapshot の準備
-  build-snapshot.sh               aws-samples 経由の準備（当環境では動作せず）
   stage-model.sh                  フェーズ 2 の準備
 bin/
   prep.sh                         展開、適用、バージョン確認

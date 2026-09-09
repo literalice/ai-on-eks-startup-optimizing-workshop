@@ -5,7 +5,7 @@ Prints a stage table and stacked bars to the terminal for the live session, and
 writes results/report.md so the numbers leave the room in a form that can be
 pasted into a document.
 
-If an variant was run more than once the latest run wins, and the earlier ones are
+If a variant was run more than once the latest run wins, and the earlier ones are
 listed underneath so a re-run that contradicts the first is visible rather than
 silently overwritten.
 
@@ -46,6 +46,12 @@ VARIANT_DESCRIPTIONS = {
     "weights-runai-local": "weights copied S3 to disk, Run:ai Model Streamer from disk",
     "weights-runai-s3": "no copy: Run:ai Model Streamer reads S3 directly",
 }
+
+# Karpenter's unavailable-offerings cache has a 3-minute TTL, so a pod waiting on a
+# capacity-starved instance type sits for up to ~180s before a NodeClaim is even created.
+# Flag anything over half that, which is already far outside the 1-2s a healthy decision
+# takes and cannot be explained by what a variant configures.
+DECISION_ANOMALY_S = 90.0
 
 COLD_VARIANTS = ["baseline", "snapshot", "soci", "automode"]
 WEIGHTS_VARIANTS = ["weights-s3-initcontainer", "weights-runai-local", "weights-runai-s3"]
@@ -219,6 +225,29 @@ def markdown(runs, order, extras):
             f"> Variants landed in more than one Availability Zone "
             f"({', '.join(sorted(launched_zones))}). Same-region pull paths, so the "
             f"effect should be small, but it is a difference the table does not control for."
+        )
+        out.append("")
+
+    # A long "Karpenter decision" segment is scheduling latency, not something the variant
+    # configures, and it lands entirely in the total. The usual cause is Karpenter waiting
+    # out its unavailable-offerings cache after an InsufficientInstanceCapacity error: that
+    # cache has a 3-minute TTL, so a delay near 180s is that and not the variant.
+    slow_decisions = []
+    for variant in order:
+        for seg in runs[variant].get("segments", []):
+            if seg["label"] == "Karpenter decision" and seg["seconds"] >= DECISION_ANOMALY_S:
+                slow_decisions.append((variant, seg["seconds"]))
+    if slow_decisions:
+        listed = ", ".join(f"`{v}` {s:.0f}s" for v, s in slow_decisions)
+        out.append(
+            f"> **Scheduling latency is inflating some totals.** Karpenter took "
+            f"{DECISION_ANOMALY_S:.0f}s or more to create a NodeClaim after the pod "
+            f"appeared, for: {listed}. That time is before any instance is launched, so it "
+            f"is not attributable to what the variant configures. The usual cause is "
+            f"Karpenter waiting out its unavailable-offerings cache after an "
+            f"`InsufficientInstanceCapacity` error, which has a 3-minute TTL. Compare the "
+            f"image column rather than the total, or re-run when capacity for the instance "
+            f"type has recovered."
         )
         out.append("")
 

@@ -45,6 +45,37 @@ spec:
 | `/dev/xvdb` | The data volume. Container images and logs are stored here. The later steps change how this volume is used. |
 | `iops` and `throughput` at the gp3 maximum | So that a difference between variants is not caused by volume performance. Keep these values the same in every variant. |
 
+### Why the alias rather than a pinned NVIDIA AMI
+
+The alias resolves to the NVIDIA variant only for GPU instance types. Naming
+`aws-k8s-<version>-nvidia` directly instead would keep that AMI for every type the node pool
+can select, and the NVIDIA variant does not finish booting on an instance without a GPU. That
+combination is easy to create by accident: a node pool that allows a range of instance types,
+with the AMI pinned.
+
+Here is what it looks like. This is the serial console of an `m6i.large`, which has no GPU,
+booting `aws-k8s-1.34-nvidia`:
+
+```
+NVRM: No NVIDIA GPU found.
+driverdog: '/usr/bin/modprobe' failed - modprobe: ERROR: could not insert 'nvidia': No such device
+[FAILED] Failed to start Load Tesla kernel modules.
+[DEPEND] Dependency failed for Driver units.
+[DEPEND] Dependency failed for Bottlerocket initial configuration complete.
+[DEPEND] Dependency failed for Activate configured.target.
+```
+
+`load-tesla-kernel-modules.service` is `RequiredBy=drivers.target`, and `drivers.target` is
+`RequiredBy=preconfigured.target`. Bottlerocket's boot chain is `preconfigured.target` →
+`configured.target` → `multi-user.target`, each requiring the previous one, so the boot stops
+at the first of them. The same instance type on the non-NVIDIA `aws-k8s-1.34` AMI reached
+`Reached target Driver units` with no failures.
+
+Units ordered after those targets do not start. That includes kubelet and the control
+container that runs the SSM agent, which is `WantedBy=multi-user.target`. The instance still
+reaches EC2 state `running`, so a caller that waits on instance state rather than on node
+registration waits indefinitely.
+
 ---
 
 ## Apply and run
@@ -149,6 +180,36 @@ spec:
 | `/dev/xvda` | OS を保持する control ボリューム。OS がイミュータブルなため小容量です。 |
 | `/dev/xvdb` | データボリューム。コンテナイメージとログが保存されます。以降のステップはこのボリュームの使い方を変更します。 |
 | `iops` と `throughput` を gp3 の最大値に | variant 間の差がボリューム性能に起因しないようにするためです。全 variant で同じ値にしてください。 |
+
+### NVIDIA AMI を固定せず alias を使う理由
+
+alias が NVIDIA variant に解決されるのは、GPU インスタンスタイプの場合だけです。
+`aws-k8s-<version>-nvidia` を直接指定すると、その node pool が選択しうる全タイプでその AMI が
+使われます。そして NVIDIA variant は GPU の無いインスタンスでは boot が完了しません。この
+組み合わせは意図せず作られやすいものです。幅のあるインスタンスタイプを許可した node pool で、
+AMI を固定した場合です。
+
+実際の出力を示します。GPU を持たない `m6i.large` で `aws-k8s-1.34-nvidia` を起動した際の
+シリアルコンソールです。
+
+```
+NVRM: No NVIDIA GPU found.
+driverdog: '/usr/bin/modprobe' failed - modprobe: ERROR: could not insert 'nvidia': No such device
+[FAILED] Failed to start Load Tesla kernel modules.
+[DEPEND] Dependency failed for Driver units.
+[DEPEND] Dependency failed for Bottlerocket initial configuration complete.
+[DEPEND] Dependency failed for Activate configured.target.
+```
+
+`load-tesla-kernel-modules.service` は `RequiredBy=drivers.target` で、`drivers.target` は
+`RequiredBy=preconfigured.target` です。Bottlerocket の boot チェーンは
+`preconfigured.target` → `configured.target` → `multi-user.target` で各段が前段を `Requires`
+するため、boot はその最初の段で止まります。同じインスタンスタイプで NVIDIA でない
+`aws-k8s-1.34` AMI を使った場合は、失敗なく `Reached target Driver units` に到達しました。
+
+これらの target より後に順序付けられたユニットは起動しません。kubelet と、SSM agent を動かす
+control container（`WantedBy=multi-user.target`）が該当します。インスタンスは EC2 の状態としては
+`running` に到達するため、ノードの登録ではなくインスタンスの状態を待つ呼び出し側は待ち続けます。
 
 ---
 

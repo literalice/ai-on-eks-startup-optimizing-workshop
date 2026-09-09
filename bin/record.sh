@@ -74,12 +74,14 @@ fi
 
 # --idle-time-limit compresses waiting, not the printed measurements.
 # --overwrite so a re-run of the same second does not fail.
+# --window-size, not --cols/--rows. asciinema 3.x renamed them and still accepts the old
+# flags without applying them, so passing --cols 108 --rows 32 produces a cast recorded at
+# the default 80x24 and exits 0. Check the cast header if a table wraps unexpectedly.
 env COLUMNS="${COLS}" LINES="${ROWS}" TERM=xterm-256color \
   asciinema rec \
     --overwrite \
     --idle-time-limit "${IDLE}" \
-    --cols "${COLS}" \
-    --rows "${ROWS}" \
+    --window-size "${COLS}x${ROWS}" \
     --command "${RECORD_CMD}" \
     "${CAST}"
 

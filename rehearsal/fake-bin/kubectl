@@ -252,7 +252,7 @@ def main():
         if "--no-headers" in args:
             # Warm check counts lines. A warm variant already has its node.
             if "warm" in variant or "weights" in variant:
-                print("nc-1   g6.4xlarge   us-west-2a   ip-10-0-1-5   True   12m")
+                print("nc-1   g6.8xlarge   us-west-2a   ip-10-0-1-5   True   12m")
             return 0
         print(json.dumps(rewrite(obj, variant, real_start, elapsed, zero)))
     elif kind == "events":

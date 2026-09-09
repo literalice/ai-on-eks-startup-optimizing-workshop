@@ -5,14 +5,24 @@
 #   bin/bench.sh baseline          # leaves a node with the image cached
 #   snapshot/snapshot-from-node.sh       # snapshot that node's data volume
 #
-# Why this instead of aws-samples/bottlerocket-images-cache: that script launches
-# its own Bottlerocket instance and drives it over SSM Run Command. On the
-# EKS-optimized Bottlerocket NVIDIA AMI the instance never registered with SSM for
-# us -- public subnet, public IP, instance profile all correct -- and the script sat
-# at "Launching SSM" indefinitely with no timeout.
+# This is the FALLBACK method. Prefer snapshot/build-snapshot.sh, which wraps
+# aws-samples/bottlerocket-images-cache. Reasons, in the order that matters for running
+# this in production:
 #
-# Using a node the workshop already produced is faster, and the cached layers are
-# written by the same containerd and OS version that will later read them.
+#   1. That script stops kubelet and then stops the instance before snapshotting, so the
+#      snapshot is filesystem-consistent. This script snapshots a live, mounted volume.
+#   2. It removes any existing images first and pulls only the images you name, so the
+#      snapshot holds nothing else. A node's data volume also carries kubelet state, pod
+#      logs and any other image that node happened to pull.
+#   3. Its volume size is a parameter. This script inherits the node's data volume size, so
+#      every node restored from the result gets a volume that large whether it needs it or
+#      not.
+#   4. It runs from an image tag with no cluster involved, which is what a pipeline
+#      triggered by an image build needs.
+#
+# Use this script when a dedicated builder instance is not an option: SSM unreachable from
+# the target subnets, or an account where launching an ad-hoc instance with its own IAM role
+# is not permitted. Drain the node first if you use it for anything beyond a demo.
 #
 # Requirements: a baseline (or any non-NVMe) node must be up with the image pulled.
 # The SOCI variant is not a valid source -- instanceStorePolicy moves container storage to

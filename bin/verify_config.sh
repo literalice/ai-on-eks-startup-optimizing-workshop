@@ -81,7 +81,7 @@ info "instance ${INSTANCE_ID}"
 #
 # The node reports allocatable ephemeral-storage from wherever kubelet's root is.
 # On an EBS data volume that tracks the volume size; once container storage moves to
-# a RAID0 of local NVMe it tracks the NVMe instead, which on g6.4xlarge is much
+# local NVMe it tracks the instance store instead, which on g6.8xlarge is much
 # larger. So this single number distinguishes "EBS" from "NVMe" without shell access
 # to a node that has no shell.
 ################################################################################

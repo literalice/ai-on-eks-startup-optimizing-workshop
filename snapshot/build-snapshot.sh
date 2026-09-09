@@ -20,7 +20,9 @@ REGION="${REGION:-us-west-2}"
 K8S_VERSION="${K8S_VERSION:-1.34}"
 IMAGE="${IMAGE:-}"
 SNAPSHOT_SIZE="${SNAPSHOT_SIZE:-80}"
-BUILDER_INSTANCE_TYPE="${BUILDER_INSTANCE_TYPE:-m6i.4xlarge}"
+# Must have a GPU, because AMI_SSM_PATH below is the NVIDIA variant. See the check further
+# down for what happens otherwise.
+BUILDER_INSTANCE_TYPE="${BUILDER_INSTANCE_TYPE:-g6.4xlarge}"
 SSM_PARAM="${SSM_PARAM:-/bottlerocket-workshop/image-cache-snapshot-id}"
 WORKDIR="${WORKDIR:-/tmp/bottlerocket-images-cache}"
 
@@ -32,6 +34,34 @@ fi
 
 # The NVIDIA variant, so the cached layers land on the same OS the variants run on.
 AMI_SSM_PATH="/aws/service/bottlerocket/aws-k8s-${K8S_VERSION}-nvidia/x86_64/latest/image_id"
+
+# The NVIDIA variant does not finish booting on an instance without a GPU, and the failure
+# is invisible from here.
+#
+# load-tesla-kernel-modules.service runs `modprobe nvidia`, which fails with ENODEV when
+# there is no NVIDIA device. That unit is RequiredBy=drivers.target, and drivers.target is
+# RequiredBy=preconfigured.target. Bottlerocket's boot chain is preconfigured.target ->
+# configured.target -> multi-user.target, each requiring the previous, so the boot stops at
+# the first of them. The control container that runs the SSM agent is
+# WantedBy=multi-user.target, so it never starts. The instance still reaches EC2 state
+# `running`, and the wrapped script's SSM wait loop has no timeout, so the symptom is an
+# indefinite hang at "[2/8] Launching SSM".
+echo "==> checking that ${BUILDER_INSTANCE_TYPE} has a GPU"
+GPU_COUNT="$(aws ec2 describe-instance-types \
+  --region "${REGION}" \
+  --instance-types "${BUILDER_INSTANCE_TYPE}" \
+  --query 'InstanceTypes[0].GpuInfo.Gpus[0].Count' \
+  --output text 2>/dev/null || true)"
+
+if [[ -z "${GPU_COUNT}" || "${GPU_COUNT}" == "None" ]]; then
+  echo "ERROR: BUILDER_INSTANCE_TYPE=${BUILDER_INSTANCE_TYPE} has no GPU, but the AMI is the" >&2
+  echo "       NVIDIA variant (${AMI_SSM_PATH})." >&2
+  echo "       The instance would boot but never register with SSM, and this script would" >&2
+  echo "       hang at \"Launching SSM\". Use a GPU instance type, for example:" >&2
+  echo "         BUILDER_INSTANCE_TYPE=g6.xlarge $0" >&2
+  exit 2
+fi
+echo "    ${GPU_COUNT} GPU(s)"
 
 echo "==> region                ${REGION}"
 echo "==> bottlerocket AMI path ${AMI_SSM_PATH}"

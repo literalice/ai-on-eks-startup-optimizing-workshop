@@ -166,7 +166,7 @@ say "The next check does not use the timing figures. It reads the volume the nod
 
 run "${HERE}/verify_config.sh" snapshot
 
-say "Building that snapshot took three to five minutes, and it has to be rebuilt whenever the image changes. That is the figure to weigh against this improvement in the last section."
+say "Building that snapshot took ten to twenty minutes on a dedicated builder instance, and it has to be rebuilt whenever the image changes. That is the figure to weigh against this improvement in the last section."
 
 say "The SOCI variant now: instead of pre-baking, we move container storage onto the instance's local NVMe and switch the snapshotter to SOCI in parallel pull/unpack mode. SOCI opens several connections per layer and unpacks several layers at once. The image is completely unmodified -- no index to build, no change to your build pipeline."
 

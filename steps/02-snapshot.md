@@ -16,31 +16,77 @@ not contact the registry.
 
 ## Part A — build the snapshot
 
-The snapshot has to be taken from a node that has already pulled the image. Step 1 leaves
-such a node, so do not run `reset.sh` before this:
+Use a dedicated builder instance. This is the method to take back to your own environment,
+so it is the one the workshop runs:
 
 ```bash
-bin/bench.sh baseline                # run again if you have already reset
+IMAGE="<your workload image>" snapshot/build-snapshot.sh    # takes 10-20 minutes
+```
+
+The script wraps [`aws-samples/bottlerocket-images-cache`][cache], which:
+
+1. launches a Bottlerocket instance from the AMI you name, on a GPU instance type
+2. stops `kubelet`, then removes every image already on the volume
+3. pulls the images you listed
+4. **stops the instance**, then snapshots its `/dev/xvdb`
+5. terminates the instance and writes the snapshot ID to an SSM parameter
+
+[cache]: https://github.com/aws-samples/bottlerocket-images-cache
+
+Steps 2 and 4 are the reason to prefer this in production. The snapshot is taken from a
+stopped instance, so it is filesystem-consistent, and it holds only the images you asked
+for. The volume size is a parameter (`SNAPSHOT_SIZE`), so the snapshot is as large as the
+images need rather than as large as some node's data volume. And it runs from an image tag
+with no cluster involved, which is what a pipeline triggered by an image build needs.
+
+> The builder instance type must have a GPU, because the AMI is the NVIDIA variant. On a
+> GPU-less instance the NVIDIA variant does not finish booting, the SSM agent never starts,
+> and the wrapped script waits forever — see
+> [step 1](01-baseline.md#why-the-alias-rather-than-a-pinned-nvidia-ami) for the boot
+> sequence. The script checks this before launching anything.
+
+### The other two ways, and when they win
+
+There are three places the snapshot can come from. The workshop walks through the first one
+only; the other two are listed so you can tell whether your environment changes the answer.
+
+| Source | Consistent | Contents | Volume size | Needs |
+|---|---|---|---|---|
+| **Dedicated builder instance** (`build-snapshot.sh`) | Yes — instance stopped first | Only the images you name | `SNAPSHOT_SIZE` | An instance with an SSM-capable role; no cluster |
+| **A build-only node in the cluster** (`snapshot-from-node.sh` with `SOURCE_NODEPOOL`) | No — volume is mounted | Your images plus kubelet state and DaemonSet images | The node class's `blockDeviceMappings` | A node pool you taint so nothing else lands there |
+| **An existing workload node** (`snapshot-from-node.sh`) | No — volume is mounted | Whatever that node has pulled | Inherited from the node | Nothing |
+
+The middle row is the one worth knowing about, because it wins on a case the builder does
+not cover: **images that need pull credentials the cluster already holds.** The builder pulls
+with its instance role, so ECR works and a private third-party registry needing an
+`imagePullSecret` does not. A node in the cluster pulls the way your workloads do. It also
+suits accounts where launching an ad-hoc instance with its own IAM role outside the cluster
+is not permitted, or where SSM is unreachable from the subnets the snapshot must live in.
+
+It needs no separate script. Create a node pool for building, taint it so only the build pod
+tolerates it, run a pod that pulls the images, then point the existing script at that pool:
+
+```bash
+SOURCE_NODEPOOL=snapshot-builder snapshot/snapshot-from-node.sh
+```
+
+What neither of the lower two rows gives you is a consistent snapshot. The volume is mounted
+and being written, so the result is crash-consistent. For a read-only image cache a partially
+written layer is discarded and re-pulled, so the effect is limited — but that is a property of
+this workload, not a general guarantee. You cannot fix it by stopping the instance either,
+because Karpenter would see the node as unhealthy and replace it.
+
+The bottom row is for a quick one-off. In this workshop, step 1 already leaves such a node:
+
+```bash
+bin/bench.sh baseline                # leaves such a node; do not reset afterwards
 snapshot/snapshot-from-node.sh       # takes 3-5 minutes
 ```
 
-The script does the following:
-
-1. finds the node for the `baseline` node pool
-2. locates that instance's `/dev/xvdb` volume
-3. calls `aws ec2 create-snapshot` on the volume and waits for it to complete
-4. writes the snapshot ID to `results/snapshot-id.txt`
-
-> The node must be a `baseline` node. `soci` sets `instanceStorePolicy`, which moves
-> container storage to local NVMe, so a `soci` node's EBS data volume is empty.
-> Snapshotting it produces an empty snapshot, and `snapshot` then pulls the image as
-> normal.
-
-> `snapshot/build-snapshot.sh` did not work in our environment. It wraps
-> `aws-samples/bottlerocket-images-cache`, which launches its own instance and controls it
-> through SSM Run Command. On the EKS-optimized Bottlerocket NVIDIA AMI the instance did
-> not register with SSM, and the script has no timeout, so it stopped at "Launching SSM".
-> It is kept for reference.
+> For either of the lower two rows the node must not be a `soci` node. `soci` sets
+> `instanceStorePolicy`, which moves container storage to local NVMe, so its EBS data volume
+> is empty. Snapshotting it produces an empty snapshot, and `snapshot` then pulls the image
+> as normal.
 
 ---
 
@@ -156,31 +202,78 @@ Bottlerocket はコンテナイメージをデータボリュームに保存し�
 
 ## パート A — スナップショットを作る
 
-スナップショットは、イメージを pull 済みのノードから取得する必要があります。ステップ 1 の
-ノードがその状態なので、その前に `reset.sh` を実行しないでください。
+専用のビルダーインスタンスを使います。自身の環境に持ち帰るのはこの方式なので、
+ワークショップでもこちらを実行します。
 
 ```bash
-bin/bench.sh baseline                # 既に reset した場合は再実行
+IMAGE="<対象のワークロードイメージ>" snapshot/build-snapshot.sh    # 10〜20 分
+```
+
+このスクリプトは [`aws-samples/bottlerocket-images-cache`][cache] のラッパーで、次を行います。
+
+1. 指定した AMI で Bottlerocket インスタンスを GPU インスタンスタイプ上に起動する
+2. `kubelet` を停止し、ボリューム上の既存イメージをすべて削除する
+3. 指定したイメージを pull する
+4. **インスタンスを停止し**、その `/dev/xvdb` をスナップショットする
+5. インスタンスを終了し、スナップショット ID を SSM パラメータに書き込む
+
+[cache]: https://github.com/aws-samples/bottlerocket-images-cache
+
+本番でこちらを選ぶ理由は 2 と 4 です。停止したインスタンスから取得するためファイルシステムと
+して整合しており、内容は指定したイメージだけです。ボリュームサイズはパラメータ
+（`SNAPSHOT_SIZE`）なので、どこかのノードのデータボリューム容量ではなく、イメージに必要な
+サイズになります。さらに、クラスターを介さずイメージタグから実行できます。これはイメージ
+ビルドを起点とするパイプラインが必要とする性質です。
+
+> ビルダーのインスタンスタイプには GPU が必要です。AMI が NVIDIA variant のためです。GPU の
+> 無いインスタンスでは NVIDIA variant の boot が完了せず、SSM agent が起動しないため、ラップ
+> 対象のスクリプトは待ち続けます。boot シーケンスは
+> [ステップ 1](01-baseline.md#nvidia-ami-を固定せず-alias-を使う理由) にあります。本スクリプトは
+> インスタンス起動前にこれを検査します。
+
+### 残る 2 つの方法と、それが有利になる条件
+
+スナップショットの取得元は 3 通りあります。ワークショップで手順を追うのは 1 つ目だけです。
+残りは、自身の環境で答えが変わるかどうかを判断できるように併記します。
+
+| 取得元 | 整合性 | 内容 | ボリュームサイズ | 必要なもの |
+|---|---|---|---|---|
+| **専用ビルダーインスタンス**（`build-snapshot.sh`） | あり（先にインスタンスを停止） | 指定したイメージだけ | `SNAPSHOT_SIZE` | SSM を使えるロールを持つインスタンス。クラスターは不要 |
+| **クラスター内のビルド専用ノード**（`snapshot-from-node.sh` + `SOURCE_NODEPOOL`） | なし（マウント中） | 指定イメージ + kubelet state + DaemonSet のイメージ | node class の `blockDeviceMappings` | 他が載らないよう taint した node pool |
+| **稼働中のワークロードノード**（`snapshot-from-node.sh`） | なし（マウント中） | そのノードが pull したもの全部 | ノードから継承 | なし |
+
+知っておく価値があるのは中段です。ビルダーがカバーしない条件で有利になります。
+**クラスターが既に保持している認証情報を必要とするイメージ**です。ビルダーはインスタンス
+ロールで pull するため ECR は動きますが、`imagePullSecret` を要するサードパーティの
+プライベートレジストリは動きません。クラスター内のノードなら、ワークロードと同じ経路で
+pull します。クラスター外で独自 IAM ロールを持つ一時インスタンスを起動できないアカウントや、
+スナップショットを置くべきサブネットから SSM に到達できない場合にも適します。
+
+専用のスクリプトは不要です。ビルド用の node pool を作り、ビルド Pod だけが tolerate する
+taint を付け、イメージを pull する Pod を動かしたうえで、既存のスクリプトをその pool に
+向けます。
+
+```bash
+SOURCE_NODEPOOL=snapshot-builder snapshot/snapshot-from-node.sh
+```
+
+下 2 段のどちらでも得られないのが、整合したスナップショットです。ボリュームはマウントされ
+書き込みが続いているため、結果はクラッシュ整合になります。読み取り専用のイメージキャッシュ
+であれば書き込み途中の層は破棄されて再 pull されるので影響は限定的ですが、これはこの
+ワークロードの性質であり一般的な保証ではありません。インスタンスを停止して回避することも
+できません。Karpenter がノードを異常と判断して置き換えるためです。
+
+最下段は一回限りの用途向けです。本ワークショップではステップ 1 がその状態のノードを残します。
+
+```bash
+bin/bench.sh baseline                # この状態のノードが残る。以降 reset しない
 snapshot/snapshot-from-node.sh       # 3〜5 分
 ```
 
-スクリプトの動作:
-
-1. `baseline` node pool のノードを見つける
-2. そのインスタンスの `/dev/xvdb` ボリュームを特定する
-3. そのボリュームに対して `aws ec2 create-snapshot` を実行し、完了まで待つ
-4. スナップショット ID を `results/snapshot-id.txt` に書き込む
-
-> 対象は `baseline` のノードである必要があります。`soci` は `instanceStorePolicy` を
-> 設定してコンテナストレージをローカル NVMe に移すため、`soci` ノードの EBS データ
+> 下 2 段のいずれでも、対象は `soci` のノードであってはいけません。`soci` は
+> `instanceStorePolicy` を設定してコンテナストレージをローカル NVMe に移すため、EBS データ
 > ボリュームは空です。これをスナップショットすると空のスナップショットができ、`snapshot` は
 > 通常どおり pull します。
-
-> `snapshot/build-snapshot.sh` は当環境では動作しませんでした。
-> `aws-samples/bottlerocket-images-cache` のラッパーで、専用インスタンスを起動して SSM Run
-> Command で操作します。EKS 最適化 Bottlerocket NVIDIA AMI ではインスタンスが SSM に
-> 登録されず、スクリプトにタイムアウトが無いため "Launching SSM" で停止しました。参考として
-> 残しています。
 
 ---
 

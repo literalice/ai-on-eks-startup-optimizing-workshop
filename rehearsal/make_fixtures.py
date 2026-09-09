@@ -35,7 +35,7 @@ def node(zone="us-west-2a", os_image="Bottlerocket OS 1.64.0 (aws-k8s-1.34-nvidi
         "metadata": {
             "name": name,
             "labels": {
-                "node.kubernetes.io/instance-type": "g6.4xlarge",
+                "node.kubernetes.io/instance-type": "g6.8xlarge",
                 "topology.kubernetes.io/zone": zone,
                 "karpenter.sh/capacity-type": "on-demand",
             },
@@ -217,7 +217,7 @@ def main() -> int:
         (d / "events.json").write_text(json.dumps({"items": spec["events"]}, indent=2))
         (d / "node.json").write_text(json.dumps(spec["node"], indent=2))
         (d / "variant.txt").write_text(name + "\n")
-        (d / "instance-type.txt").write_text("g6.4xlarge\n")
+        (d / "instance-type.txt").write_text("g6.8xlarge\n")
         (d / "image.txt").write_text(WORKLOAD + "\n")
         if spec.get("ttft"):
             (d / "ttft.json").write_text(json.dumps(spec["ttft"], indent=2))

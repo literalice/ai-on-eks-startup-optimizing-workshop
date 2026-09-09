@@ -13,8 +13,7 @@
 #      size / iops / throughput / kmsKeyID only, so the snapshot mechanism is not
 #      available here. If pre-baked images are the answer for a given workload,
 #      that workload does not go on Auto Mode.
-#   2. The SOCI settings from soci are not exposed. The service's defaults
-#      defaults.
+#   2. The SOCI settings from soci are not exposed. The service's defaults apply.
 #
 # ephemeralStorage.size is deliberately left below the instance's NVMe capacity.
 # Per the Auto Mode docs, that is the trigger for Auto Mode to attach a small

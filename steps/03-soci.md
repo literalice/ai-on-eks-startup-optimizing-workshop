@@ -58,13 +58,77 @@ spec:
 
 ### Addition 1 — `instanceStorePolicy: RAID0`
 
-Karpenter creates a RAID0 array from the instance's NVMe disks and moves
-`/var/lib/containerd`, `/var/lib/kubelet`, `/var/log/pods` and SOCI's data directory
-(`/var/lib/soci-snapshotter` on Bottlerocket) onto it, leaving symlinks in the original
-locations.
+Karpenter turns this field into a Bottlerocket bootstrap command, which is what the
+generated `userData` carries in addition to the settings shown above:
 
-SOCI buffers layers on disk while downloading. Without this setting the buffering happens
-on the EBS volume, and the EBS volume's throughput then limits the result.
+```toml
+[settings.bootstrap-commands.000-mount-instance-storage]
+commands = [
+  ["apiclient", "ephemeral-storage", "init"],
+  ["apiclient", "ephemeral-storage", "bind"],
+]
+essential = true
+mode = "always"
+```
+
+`init` prepares the instance's NVMe instance-store disks and mounts them at `/mnt`. `bind`
+then runs `mount --rbind` from a subdirectory of that mount onto each target directory. The
+data volume is not moved and no symlink is created: the target paths are covered by a
+mount, so reads and writes below them land on the instance store instead of the EBS volume.
+
+What `init` does depends on how many instance-store disks the instance type has, and this is
+worth checking for your own type rather than assuming.
+
+| Disks | What happens |
+|---|---|
+| 2 or more | `mdadm --create --level=0 --chunk=256` across them, then XFS on the array |
+| 1 | **No array.** The device is formatted XFS directly |
+| 0 | `init` logs that it found no ephemeral disks and exits successfully. `bind` then has nothing to bind, the setting fails quietly rather than failing the node, and this variant measures the same thing as step 1 |
+
+`g6.8xlarge` has two 450 GB NVMe SSDs, so the array is real here. `g6.4xlarge` and most of
+the smaller G types have one, where the policy still moves container storage to the instance
+store but nothing is striped. Check before you draw a conclusion from a throughput figure:
+
+```bash
+aws ec2 describe-instance-types --instance-types g6.8xlarge \
+  --query 'InstanceTypes[0].InstanceStorageInfo.Disks'
+```
+
+That single-disk case explains something about the field's name. `instanceStorePolicy` is a
+Karpenter field whose enum has exactly one value, `RAID0`, and it is named after its original
+implementation: on AL2 and AL2023 it reaches `setup-local-disks`, which runs `mdadm --create`
+with no single-disk exception, so one NVMe disk there still produces a single-device array at
+`/dev/md/0`. Bottlerocket support was added later, for Bottlerocket 1.22.0 and above, and
+skips the array when it would have one member. What the policy promises holds either way:
+container and kubelet state on the instance store, and allocatable ephemeral-storage equal to
+the instance store's total size.
+
+If the instance type has no instance store at all, `init` logs that it found no ephemeral
+disks and exits successfully, and `bind` then has nothing to bind. The setting fails quietly
+rather than failing the node, and the variant would measure the same thing as step 1.
+
+`bind` with no `--dirs` argument binds Bottlerocket's allow list of bindable directories,
+which is assembled from drop-in files under `/usr/lib/bottlerocket/ephemeral-storage.d`.
+The soci-snapshotter package contributes `/var/lib/soci-snapshotter` to that list, so
+SOCI's data directory is included along with `/var/lib/containerd`, `/var/lib/kubelet` and
+`/var/log/pods`. That matters, because SOCI buffers layers on disk while downloading. If
+its data directory stayed on the EBS volume, the EBS volume's throughput would limit the
+result.
+
+Which form of the command Karpenter emits depends on the AMI version. `alias:
+bottlerocket@latest` in this node class resolves to the bare `bind` above. Pinning an AMI
+version below 1.46.0 makes Karpenter emit `bind --dirs /var/lib/containerd
+/var/lib/kubelet /var/log/pods` instead, which omits `/var/lib/soci-snapshotter`. On a
+pinned 1.44.x or 1.45.x node, SOCI would run but buffer on EBS.
+
+### Why steps 2 and 3 cannot be combined
+
+The snapshot puts the image layers in `/local/var/lib/containerd` on the EBS data volume,
+which is where `/var/lib/containerd` resolves to on an unmodified node. The bind mount
+covers that path with an empty directory on the NVMe array, so kubelet cannot reach the
+pre-baked layers and pulls the image again. The cause is the mount, not the volume: the
+snapshot is still restored and the layers are still on the EBS volume, but that path now
+resolves to the instance store.
 
 ### Addition 2 — `userData`
 
@@ -203,12 +267,73 @@ spec:
 
 ### 追加 1 — `instanceStorePolicy: RAID0`
 
-Karpenter がインスタンスの NVMe ディスクから RAID0 を構成し、`/var/lib/containerd`、
-`/var/lib/kubelet`、`/var/log/pods`、SOCI のデータディレクトリ（Bottlerocket では
-`/var/lib/soci-snapshotter`）を移動して、元の場所には symlink を残します。
+Karpenter はこのフィールドを Bottlerocket の bootstrap command に変換します。上記の設定に
+加えて、生成される `userData` にはこれが入ります。
 
-SOCI はダウンロード中にレイヤをディスクにバッファします。この設定が無い場合、バッファ先は
-EBS ボリュームになり、EBS のスループットが結果を制限します。
+```toml
+[settings.bootstrap-commands.000-mount-instance-storage]
+commands = [
+  ["apiclient", "ephemeral-storage", "init"],
+  ["apiclient", "ephemeral-storage", "bind"],
+]
+essential = true
+mode = "always"
+```
+
+`init` がインスタンスの NVMe インスタンスストアを準備して `/mnt` にマウントし、`bind` が
+その配下のサブディレクトリを対象ディレクトリへ `mount --rbind` します。データボリュームは
+移動せず、symlink も作られません。対象パスがマウントで覆われるため、その下への読み書きが
+EBS ボリュームではなくインスタンスストアに向きます。
+
+`init` の動作はインスタンスストアのディスク本数で変わります。ここは自身のタイプについて
+確認する価値があります。
+
+| ディスク | 動作 |
+|---|---|
+| 2 本以上 | `mdadm --create --level=0 --chunk=256` でストライピングし、アレイを XFS でフォーマット |
+| 1 本 | **アレイを作りません。** デバイスを直接 XFS でフォーマット |
+| 0 本 | `init` は ephemeral disk が見つからないと記録して正常終了。`bind` はバインド対象を持たず、設定はノードを失敗させずに静かに無効となり、この variant はステップ 1 と同じものを計測する |
+
+`g6.8xlarge` は 450 GB の NVMe SSD が 2 本なので、ここではアレイが実際に作られます。
+`g6.4xlarge` や小さめの G 系は 1 本で、ポリシーはコンテナストレージをインスタンスストアに
+移しますが、ストライピングは発生しません。スループットの数字から結論を出す前に確認して
+ください。
+
+```bash
+aws ec2 describe-instance-types --instance-types g6.8xlarge \
+  --query 'InstanceTypes[0].InstanceStorageInfo.Disks'
+```
+
+この 1 本のケースが、フィールド名の由来を説明します。`instanceStorePolicy` は Karpenter の
+フィールドで、enum の値は `RAID0` の 1 つだけです。名前は元の実装に由来します。AL2 と
+AL2023 では `setup-local-disks` に到達し、そこには本数の分岐が無いため `mdadm --create` が
+実行され、NVMe が 1 本でも単一デバイスのアレイが `/dev/md/0` にできます。Bottlerocket
+対応は後から（Bottlerocket 1.22.0 以降で）入り、メンバーが 1 つになる場合はアレイを省きます。
+ポリシーが約束するものはどちらでも成立します。containerd と kubelet の state を
+インスタンスストアに置き、allocatable ephemeral-storage をインスタンスストア合計サイズに
+することです。
+
+`--dirs` を付けない `bind` は、Bottlerocket が持つバインド可能ディレクトリの許可リスト全体を
+バインドします。許可リストは `/usr/lib/bottlerocket/ephemeral-storage.d` 配下のドロップイン
+ファイルから構成され、soci-snapshotter パッケージが `/var/lib/soci-snapshotter` を寄与して
+います。したがって `/var/lib/containerd`、`/var/lib/kubelet`、`/var/log/pods` と併せて SOCI の
+データディレクトリも対象になります。SOCI はダウンロード中にレイヤをディスクにバッファする
+ため、ここが重要です。データディレクトリが EBS ボリュームに残った場合、EBS のスループットが
+結果を制限します。
+
+Karpenter がどちらの形式のコマンドを出力するかは AMI バージョンで決まります。この node class
+の `alias: bottlerocket@latest` は上記の `--dirs` 無しの形式になります。1.46.0 未満の AMI
+バージョンを固定した場合は `bind --dirs /var/lib/containerd /var/lib/kubelet /var/log/pods`
+になり、`/var/lib/soci-snapshotter` が対象から外れます。1.44.x や 1.45.x を固定したノードでは
+SOCI は動作しますが、バッファ先は EBS になります。
+
+### ステップ 2 と 3 を併用できない理由
+
+スナップショットはイメージレイヤを EBS データボリューム上の `/local/var/lib/containerd` に
+置きます。未変更のノードでは `/var/lib/containerd` がそこに解決されます。bind mount はその
+パスを NVMe アレイ上の空ディレクトリで覆うため、kubelet は焼き込んだレイヤに到達できず、
+イメージを再度 pull します。原因はボリュームではなくマウントです。スナップショットは復元され、
+レイヤも EBS ボリューム上にありますが、そのパスの解決先がインスタンスストアに変わります。
 
 ### 追加 2 — `userData`
 
