@@ -119,6 +119,10 @@ title "The environment"
 
 say "Two clusters, one shared VPC. Self-managed Karpenter carries baseline, snapshot and soci; EKS Auto Mode carries automode. Two clusters rather than one because both Karpenters own the same CRDs."
 
+run "${HERE}/verify_env.sh"
+
+say "Two of those checks are worth pointing out. The instance type is read back from all three node pools, because a variant that got more vCPU than another would look like a faster mechanism. And the Karpenter controller is pinned to the managed node group; if that group has no nodes the controller cannot run, nothing creates node claims, and every variant sits Pending for the full timeout with nothing saying why."
+
 run kubectl --context "${KARPENTER_CLUSTER}" get nodes -o wide
 run kubectl --context "${AUTOMODE_CLUSTER}" get nodes -o wide
 
