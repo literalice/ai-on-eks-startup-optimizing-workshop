@@ -44,21 +44,13 @@ head2() { printf '\n%s%s%s\n' "${BOLD}" "$1" "${RESET}"; }
 ################################################################################
 head2 "Command line tools"
 
-for tool in aws kubectl terraform jq python3; do
+for tool in aws kubectl terraform python3; do
   if command -v "${tool}" >/dev/null 2>&1; then
     pass "${tool}"
   else
     fail "${tool} is not on PATH"
   fi
 done
-
-# Only phase 2 needs this, and only on the machine that stages the model to S3.
-if command -v hf >/dev/null 2>&1; then
-  pass "hf (Hugging Face CLI)"
-else
-  warn "hf is not on PATH. Needed only to stage the model for phase 2:"
-  note "pip install --upgrade 'huggingface_hub[cli]'"
-fi
 
 if command -v aws >/dev/null 2>&1; then
   AWS_MAJOR="$(aws --version 2>&1 | sed -n 's|^aws-cli/\([0-9]*\).*|\1|p')"
@@ -72,14 +64,13 @@ fi
 ################################################################################
 head2 "Credentials and region"
 
-if ! CALLER="$(aws sts get-caller-identity --output json 2>/dev/null)"; then
+if ! CALLER="$(aws sts get-caller-identity --query '[Account,Arn]' --output text 2>/dev/null)"; then
   fail "aws sts get-caller-identity failed. No usable credentials."
   echo
   echo "Stopping here: the remaining checks all need credentials."
   exit 1
 fi
-ACCOUNT="$(printf '%s' "${CALLER}" | jq -r '.Account')"
-ARN="$(printf '%s' "${CALLER}" | jq -r '.Arn')"
+read -r ACCOUNT ARN <<<"${CALLER}"
 pass "credentials resolve to account ${ACCOUNT}"
 note "${ARN}"
 

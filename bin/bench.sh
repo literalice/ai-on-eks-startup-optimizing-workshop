@@ -265,7 +265,7 @@ if [[ ( "${TARGET}" == "weights" || "${TARGET}" == "compile" ) && ${WATCH_RC} -e
   TTFT_RC=$?
   set -e
   if [[ ${TTFT_RC} -eq 0 ]]; then
-    jq -r '"    first token in \(.ttft_seconds)s, then \(.tokens_received) tokens in \(.total_seconds)s total"' \
+    python3 -c 'import json,sys; d=json.load(sys.stdin); print(f"    first token in {d[\"ttft_seconds\"]}s, then {d[\"tokens_received\"]} tokens in {d[\"total_seconds\"]}s total")' \
       "${RAW}/ttft.json" 2>/dev/null || cat "${RAW}/ttft.json"
   else
     echo "    !! probe failed:"
@@ -291,7 +291,7 @@ kubectl --context "${CONTEXT}" get nodeclaims \
 kubectl --context "${CONTEXT}" -n bench logs "${POD}" --all-containers --tail=200 \
   > "${RAW}/pod.log" 2>/dev/null || true
 
-NODE_NAME="$(jq -r '.spec.nodeName // empty' "${RAW}/pod.json")"
+NODE_NAME="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("spec",{}).get("nodeName") or "")' "${RAW}/pod.json")"
 if [[ -n "${NODE_NAME}" ]]; then
   kubectl --context "${CONTEXT}" get node "${NODE_NAME}" -o json > "${RAW}/node.json"
 else

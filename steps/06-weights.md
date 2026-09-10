@@ -16,9 +16,15 @@ each run also measures the time until the server produces its first token.
 snapshot/stage-model.sh
 ```
 
-This downloads the model from Hugging Face and uploads it to S3. It skips the `.bin` files,
-because those hold the same weights in an older format and would double the transfer for no
-benefit.
+This submits a Job that downloads the model from Hugging Face and uploads it to S3, then
+follows its log. The download and the upload happen on a node rather than on your machine, so
+nothing has to be installed locally for it and the weights do not travel via your connection.
+The Job skips the `.bin` files, because those hold the same weights in an older format and
+would double the transfer for no benefit.
+
+It runs under its own service account, `stage-model`, which is bound to a role that can write
+to the bucket. The measured pods use `bench`, whose role is read-only. Keeping them apart means
+a measured pod cannot write to the bucket it reads from.
 
 > If you adapt this script, give each exclude pattern its own `--exclude` flag. The flag takes
 > one value. When several values follow a single flag, the CLI reads the extra ones as names of
@@ -295,8 +301,14 @@ Back to: [README](../README.md#what-to-adopt)
 snapshot/stage-model.sh
 ```
 
-Hugging Face からモデルを取得して S3 にアップロードします。`.bin` ファイルは除外します。
-同じウェイトの旧形式であり、含めても転送量が倍になるだけで得るものがないためです。
+Hugging Face からモデルを取得して S3 にアップロードする Job を投入し、そのログを追跡します。
+ダウンロードとアップロードは手元のマシンではなくノード上で行われるため、このためにローカルに
+インストールするものはなく、ウェイトが手元の回線を通ることもありません。Job は `.bin` ファイルを
+除外します。同じウェイトの旧形式であり、含めても転送量が倍になるだけで得るものがないためです。
+
+Job は専用のサービスアカウント `stage-model` で動き、これはバケットへ書き込めるロールに紐付いて
+います。計測対象の Pod が使う `bench` のロールは読み取り専用です。分けておくことで、計測対象の
+Pod が自分が読むバケットに書き込めない状態を保てます。
 
 > このスクリプトを流用する場合、除外パターンは 1 つごとに `--exclude` を付けてください。この
 > フラグが取る値は 1 つです。1 つのフラグの後に値を複数並べると、CLI は 2 つ目以降をダウンロード

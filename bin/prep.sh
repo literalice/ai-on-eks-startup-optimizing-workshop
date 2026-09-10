@@ -17,7 +17,6 @@ mkdir -p "${RENDERED}" "${ROOT}/results" "${ROOT}/raw"
 need() { command -v "$1" >/dev/null 2>&1 || { echo "missing dependency: $1" >&2; exit 1; }; }
 need aws
 need kubectl
-need jq
 need python3
 
 ################################################################################
@@ -137,10 +136,16 @@ done
 kubectl --context "${KARPENTER_CLUSTER}" create namespace bench \
   --dry-run=client -o yaml | kubectl --context "${KARPENTER_CLUSTER}" apply -f -
 
-# The phase 2 pods read S3 through this service account, which Terraform binds to an
-# IAM role with EKS Pod Identity.
-kubectl --context "${KARPENTER_CLUSTER}" -n bench create serviceaccount bench \
-  --dry-run=client -o yaml | kubectl --context "${KARPENTER_CLUSTER}" -n bench apply -f -
+# Two service accounts, each bound by Terraform to its own IAM role through EKS Pod Identity.
+#
+#   bench        the measured pods. Reads the weights, nothing more.
+#   stage-model  the Job that puts the weights in the bucket. Writes.
+#
+# Kept apart so that a measured pod cannot write to the bucket it reads from.
+for sa in bench stage-model; do
+  kubectl --context "${KARPENTER_CLUSTER}" -n bench create serviceaccount "${sa}" \
+    --dry-run=client -o yaml | kubectl --context "${KARPENTER_CLUSTER}" -n bench apply -f -
+done
 
 # The time-to-first-token probe runs inside the workload pod. Loaded from the file
 # rather than duplicated into a manifest, so there is one copy to maintain.

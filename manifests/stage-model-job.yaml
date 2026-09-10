@@ -1,0 +1,118 @@
+################################################################################
+# Put the model weights in S3, from inside the cluster.
+#
+# Phases 2 and 3 read the weights from S3 rather than from the container image, so they have
+# to be there first. This Job does the download and the upload on a node, which means no
+# local Python, no `hf` install, and no multi-gigabyte round trip through whoever is running
+# the workshop.
+#
+# It also runs on the same network path the measurements use: the S3 Gateway endpoint applies,
+# so the upload does not go through the NAT gateway.
+#
+# Credentials come from the `stage-model` service account through EKS Pod Identity, which is a
+# different identity from the one the measured pods use. Those read the weights and nothing
+# more, so their role is read-only; this Job writes. The node role is not usable from a pod
+# here, because Karpenter sets the IMDS hop limit to 1.
+#
+# It runs on the system node group rather than a GPU node. There is no GPU work involved, and
+# a GPU node for a download would cost several times more per hour.
+#
+# @MODEL_HF_REPO@, @MODEL_PREFIX@, @MODEL_BUCKET@ and @REGION@ are substituted by
+# snapshot/stage-model.sh.
+################################################################################
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: stage-model
+  namespace: bench
+spec:
+  backoffLimit: 2
+  # Removed automatically an hour after finishing, so a re-run does not collide with a
+  # completed Job of the same name.
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: bench
+        phase: stage-model
+    spec:
+      restartPolicy: Never
+      serviceAccountName: stage-model
+      # No GPU, no taint toleration: this belongs on the small managed node group.
+      nodeSelector:
+        kubernetes.io/os: linux
+      containers:
+        - name: stage
+          # Chosen because it already has python3 and pip, which is all this needs. The AWS
+          # CLI is installed at start rather than baked in, to avoid maintaining an image
+          # for one Job.
+          image: public.ecr.aws/docker/library/python:3.12-slim
+          command: ["bash", "-c"]
+          args:
+            - |
+              set -euo pipefail
+
+              echo "==> installing the tools this Job needs"
+              pip install --quiet --no-cache-dir 'huggingface_hub[cli]' awscli
+
+              echo "==> downloading @MODEL_HF_REPO@"
+              # Safetensors only. The .bin files are the same weights in the older format, so
+              # fetching both doubles the transfer for nothing.
+              #
+              # One --exclude per pattern. The flag takes a single value, and stacking values
+              # after one flag makes the CLI read the extras as filenames to download: it
+              # prints "Ignoring --exclude since filenames have being explicitly set", exits
+              # 0, and downloads nothing. A silent no-op that looks like success.
+              hf download "@MODEL_HF_REPO@" \
+                --local-dir "/staging/@MODEL_PREFIX@" \
+                --exclude "*.pth" \
+                --exclude "*.bin" \
+                --exclude "original/*"
+
+              echo "==> downloaded"
+              du -sh "/staging/@MODEL_PREFIX@"
+
+              echo "==> uploading to s3://@MODEL_BUCKET@/@MODEL_PREFIX@/"
+              # Excluding .cache: hf download leaves its own lock and metadata files under
+              # .cache/huggingface, which the loader never reads and which triple the object
+              # count in the bucket.
+              aws s3 sync "/staging/@MODEL_PREFIX@" \
+                "s3://@MODEL_BUCKET@/@MODEL_PREFIX@/" \
+                --exclude ".cache/*" \
+                --region "@REGION@" --only-show-errors
+
+              echo "==> objects in place"
+              aws s3 ls "s3://@MODEL_BUCKET@/@MODEL_PREFIX@/" \
+                --region "@REGION@" --human-readable
+          env:
+            # The SDK will not infer the region inside a container.
+            - name: AWS_REGION
+              value: "@REGION@"
+            - name: AWS_DEFAULT_REGION
+              value: "@REGION@"
+            # Keep pip and the model off the container's writable layer.
+            - name: HOME
+              value: /staging
+            - name: HF_HOME
+              value: /staging/.hf
+          resources:
+            # Deliberately small. The managed node group is two m6i.large, and CoreDNS,
+            # kube-proxy, the Karpenter controller and the CNI already hold most of those
+            # 2 vCPU. Requesting a whole core leaves the pod Pending with "Insufficient cpu"
+            # on a cluster that has room for the work.
+            #
+            # This is transfer-bound, not CPU-bound, so a small request costs nothing here.
+            requests:
+              cpu: 200m
+              memory: 1Gi
+            limits:
+              memory: 4Gi
+          volumeMounts:
+            - name: staging
+              mountPath: /staging
+      volumes:
+        # Sized for the default model with room for a larger one. An emptyDir on the node's
+        # disk rather than a PVC, because nothing needs it after the Job finishes.
+        - name: staging
+          emptyDir:
+            sizeLimit: 40Gi

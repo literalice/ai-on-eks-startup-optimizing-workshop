@@ -162,22 +162,25 @@ About **two hours** in total, most of which needs no attention.
 |---|---|
 | `terraform apply` | 15 to 20 minutes, mostly two EKS control planes |
 | `snapshot/build-snapshot.sh` | 14 minutes for a 9 GB image, unattended |
-| `snapshot/stage-model.sh` | a few minutes, depending on the connection to Hugging Face |
+| `snapshot/stage-model.sh` | about a minute. It submits a Job that runs on the cluster |
 | `bin/prep.sh` | under a minute |
 | One variant | 1 to 3 minutes, plus node provisioning for a cold run |
 | All variants and both later phases | about 25 minutes |
 
-The snapshot build and the model staging are the two that take minutes without producing
-anything to watch, and neither is needed again unless the image or the model changes.
+Neither the snapshot build nor the model staging is needed again unless the image or the
+model changes.
 
 ---
 
 ## Tools and region
 
-- `aws` (v2), `kubectl`, `terraform`, `jq`, `python3`
-- The `hf` CLI, for staging the model: `pip install --upgrade 'huggingface_hub[cli]'`
+- `aws` (v2), `kubectl`, `terraform`, `python3`
 - `us-west-2` by default, set in `config.env`. Another region works if it offers the GPU
   instance type, EKS 1.34 and the AWS Deep Learning Container image.
+
+Nothing else is needed locally. The model is downloaded from Hugging Face and uploaded to S3
+by a Job running on the cluster, so the Hugging Face CLI, a Python environment for it and the
+disk for a multi-gigabyte model are not required on the machine driving the workshop.
 
 Kubernetes 1.34 or above is required. The EKS-optimized Bottlerocket NVIDIA AMI ships NVIDIA
 driver 580 from 1.34 onwards, and the CUDA 13 image used here needs driver 580.
@@ -420,22 +423,24 @@ kubectl get nodeclaims        # 何も出力されないこと
 |---|---|
 | `terraform apply` | 15〜20 分。大半は EKS コントロールプレーン 2 面 |
 | `snapshot/build-snapshot.sh` | 9 GB のイメージで 14 分。無人 |
-| `snapshot/stage-model.sh` | 数分。Hugging Face への接続速度による |
+| `snapshot/stage-model.sh` | 約 1 分。クラスター上で動く Job を投入します |
 | `bin/prep.sh` | 1 分未満 |
 | variant 1 つ | 1〜3 分。cold 実行ではノードのプロビジョニングが加わる |
 | 全 variant と後続 2 フェーズ | 約 25 分 |
 
-スナップショットの作成とモデルの配置は、数分かかるが見るものが無い 2 つです。イメージまたは
-モデルが変わらない限り再実行は不要です。
+スナップショットの作成とモデルの配置は、イメージまたはモデルが変わらない限り再実行は不要です。
 
 ---
 
 ## ツールとリージョン
 
-- `aws`（v2）、`kubectl`、`terraform`、`jq`、`python3`
-- モデル配置用の `hf` CLI: `pip install --upgrade 'huggingface_hub[cli]'`
+- `aws`（v2）、`kubectl`、`terraform`、`python3`
 - 既定は `us-west-2`。`config.env` で設定します。GPU インスタンスタイプ、EKS 1.34、AWS Deep
   Learning Container のイメージが提供されていれば他のリージョンでも動作します。
+
+ローカルに必要なものは他にありません。モデルの Hugging Face からのダウンロードと S3 への
+アップロードはクラスター上の Job が行うため、Hugging Face CLI、その Python 環境、数 GB の
+モデル用のディスクは、ワークショップを実行する手元のマシンには不要です。
 
 Kubernetes 1.34 以上が必要です。EKS 最適化 Bottlerocket NVIDIA AMI は 1.34 以降で NVIDIA
 ドライバ 580 を同梱し、ここで使う CUDA 13 のイメージはドライバ 580 を必要とします。

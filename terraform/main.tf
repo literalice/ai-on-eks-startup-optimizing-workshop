@@ -303,6 +303,70 @@ resource "aws_iam_policy" "model_weights_read" {
   tags = var.tags
 }
 
+################################################################################
+# A second identity, for the Job that puts the weights in the bucket.
+#
+# The measured pods read the weights and nothing more, so their role is read-only above. The
+# staging Job writes, which is a different set of permissions and a different principal. Adding
+# PutObject to the pods' role instead would give every measured pod write access to the bucket
+# it reads from, for the sake of one Job that runs once.
+################################################################################
+resource "aws_iam_role" "stage_model" {
+  name = "${var.name_prefix}-stage-model"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = "pods.eks.amazonaws.com"
+        }
+        Action = ["sts:AssumeRole", "sts:TagSession"]
+      },
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_policy" "model_weights_write" {
+  name        = "${var.name_prefix}-model-weights-write"
+  description = "Write access to the workshop model weights bucket, for the staging Job"
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["s3:PutObject", "s3:AbortMultipartUpload", "s3:GetObject"]
+        Resource = ["${aws_s3_bucket.models.arn}/*"]
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["s3:ListBucket"]
+        Resource = [aws_s3_bucket.models.arn]
+      },
+    ]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy_attachment" "stage_model" {
+  role       = aws_iam_role.stage_model.name
+  policy_arn = aws_iam_policy.model_weights_write.arn
+}
+
+resource "aws_eks_pod_identity_association" "stage_model" {
+  cluster_name    = module.eks_karpenter.cluster_name
+  namespace       = "bench"
+  service_account = "stage-model"
+  role_arn        = aws_iam_role.stage_model.arn
+
+  tags = var.tags
+}
+
 resource "helm_release" "karpenter" {
   namespace  = "kube-system"
   name       = "karpenter"

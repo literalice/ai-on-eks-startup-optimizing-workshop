@@ -34,7 +34,11 @@ head2() { printf '\n%s%s%s\n' "${BOLD}" "$1" "${RESET}"; }
 head2 "Both clusters are reachable"
 
 for ctx in "${KARPENTER_CLUSTER}" "${AUTOMODE_CLUSTER}"; do
-  if VER="$(kubectl --context "${ctx}" version -o json 2>/dev/null | jq -r '.serverVersion.gitVersion')"; then
+  # `kubectl version` accepts only json or yaml for --output, not jsonpath, so read the
+  # server line from the plain output instead.
+  VER="$(kubectl --context "${ctx}" version 2>/dev/null \
+    | sed -n 's|^Server Version: *||p')"
+  if [[ -n "${VER}" ]]; then
     pass "${ctx} (${VER})"
   else
     fail "cannot reach ${ctx}"
@@ -71,10 +75,11 @@ else
 fi
 
 READY_CTRL="$(kubectl --context "${KARPENTER_CLUSTER}" -n kube-system get pods \
-  -l app.kubernetes.io/name=karpenter -o json 2>/dev/null \
-  | jq -r '[.items[] | select(.status.phase == "Running")] | length')"
+  -l app.kubernetes.io/name=karpenter \
+  -o jsonpath='{range .items[?(@.status.phase=="Running")]}{.metadata.name}{"\n"}{end}' 2>/dev/null \
+  | grep -c . || true)"
 TOTAL_CTRL="$(kubectl --context "${KARPENTER_CLUSTER}" -n kube-system get pods \
-  -l app.kubernetes.io/name=karpenter -o json 2>/dev/null | jq -r '.items | length')"
+  -l app.kubernetes.io/name=karpenter --no-headers 2>/dev/null | grep -c . || true)"
 
 if [[ "${TOTAL_CTRL:-0}" -eq 0 ]]; then
   fail "no Karpenter controller pods exist in kube-system"
@@ -194,12 +199,18 @@ fi
 head2 "Nothing left over from a previous run"
 
 for ctx in "${KARPENTER_CLUSTER}" "${AUTOMODE_CLUSTER}"; do
-  PODS="$(kubectl --context "${ctx}" -n bench get pods --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+  # Only pods that still hold a node matter here. A Completed or Failed pod holds nothing,
+  # and the staging Job leaves one behind by design until its TTL expires.
+  PODS="$(kubectl --context "${ctx}" -n bench get pods \
+    --field-selector=status.phase!=Succeeded,status.phase!=Failed \
+    --no-headers 2>/dev/null | grep -c . || true)"
   if [[ "${PODS}" == "0" ]]; then
-    pass "no pods in the bench namespace on ${ctx}"
+    pass "no running pods in the bench namespace on ${ctx}"
   else
-    warn "${PODS} pod(s) still in bench on ${ctx}, holding GPU nodes"
-    kubectl --context "${ctx}" -n bench get pods --no-headers 2>/dev/null | sed 's/^/         /'
+    warn "${PODS} pod(s) still running in bench on ${ctx}, holding GPU nodes"
+    kubectl --context "${ctx}" -n bench get pods \
+      --field-selector=status.phase!=Succeeded,status.phase!=Failed \
+      --no-headers 2>/dev/null | sed 's/^/         /'
     note "kubectl --context ${ctx} -n bench delete pods --all"
   fi
 done

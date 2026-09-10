@@ -109,7 +109,7 @@ instance type, region and registry conditions, so your figures will differ.
 
 ## Prerequisites
 
-- `aws`, `kubectl`, `terraform`, `jq`, `python3`
+- `aws`, `kubectl`, `terraform`, `python3`
 - Credentials for an account in which you can create two EKS clusters
 - **GPU quota.** All variants use one instance type, `gr6.8xlarge`, which is 32 vCPU.
   Running them one at a time needs 32 vCPU of *Running On-Demand G and VT instances*.
@@ -118,7 +118,6 @@ instance type, region and registry conditions, so your figures will differ.
   aws service-quotas get-service-quota --service-code ec2 \
     --quota-code L-DB2E81BA --region us-west-2
   ```
-- For phase 2: the `hf` CLI (`pip install --upgrade 'huggingface_hub[cli]'`)
 
 Check an account against all of this without creating anything:
 
@@ -558,7 +557,7 @@ manifests/
 snapshot/
   build-snapshot.sh               snapshot preparation on a dedicated builder
   snapshot-from-node.sh           snapshot preparation, fallback
-  stage-model.sh                  phase 2 preparation
+  stage-model.sh                  phase 2 preparation, as a Job on the cluster
 bin/
   preflight.sh                    account prerequisites, before terraform
   verify_env.sh                   what terraform built, before the first variant
@@ -723,7 +722,7 @@ bin/verify_config.sh soci   # 実行後に、効いたことを確認
 
 ## 前提
 
-- `aws`, `kubectl`, `terraform`, `jq`, `python3`
+- `aws`, `kubectl`, `terraform`, `python3`
 - EKS クラスターを 2 面作成できるアカウントの認証情報
 - **GPU クォータ。** 全 variant が `gr6.8xlarge`（32 vCPU）を使います。逐次実行なら
   *Running On-Demand G and VT instances* の 32 vCPU で足りますが、128 を申請しておくと
@@ -732,7 +731,6 @@ bin/verify_config.sh soci   # 実行後に、効いたことを確認
   aws service-quotas get-service-quota --service-code ec2 \
     --quota-code L-DB2E81BA --region us-west-2
   ```
-- フェーズ 2 用: `hf` CLI（`pip install --upgrade 'huggingface_hub[cli]'`）
 
 何も作成せずに、アカウントが上記を満たしているか確認できます。
 
@@ -1155,7 +1153,7 @@ manifests/
 snapshot/
   build-snapshot.sh               専用ビルダーでの snapshot 準備
   snapshot-from-node.sh           snapshot 準備のフォールバック
-  stage-model.sh                  フェーズ 2 の準備
+  stage-model.sh                  フェーズ 2 の準備。クラスター上の Job として実行
 bin/
   preflight.sh                    アカウントの前提条件。terraform の前
   verify_env.sh                   terraform が構築したもの。最初の variant の前
