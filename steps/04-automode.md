@@ -50,7 +50,7 @@ than the instance's local NVMe capacity, Auto Mode attaches a 20 GiB EBS volume 
 ephemeral container data on the NVMe. When the value equals or exceeds NVMe capacity, Auto
 Mode does not attach the EBS volume and makes the NVMe available to the workload instead.
 
-On `g6.8xlarge` the instance store is 900 GB across two disks, so `80Gi` is below it. If you
+On `gr6.8xlarge` the instance store is 900 GB across two disks, so `80Gi` is below it. If you
 change the instance type, check this value again, because it determines where container
 storage is placed. Note that the comparison is against the instance store's total capacity,
 not one disk's.
@@ -98,13 +98,13 @@ NVMe. Together these indicate that the NVMe configuration came from the service.
 
 ## What the figures show
 
-- In the reference run this variant reached 164 MB/s, compared with 151 MB/s for step 3,
-  with 11 fewer lines of configuration.
-- The difference between `soci` and `automode` is within the run-to-run variation. The
-  reference results include two runs of phase 1: both were 89 seconds in the first run, and
-  97 and 94 seconds in the second. The ordering between them is not consistent, so the
-  timing figures do not show one to be faster than the other. The difference in the amount
-  of configuration is consistent.
+- In the reference run this variant and step 3 both reached 267 MB/s and both spent 35
+  seconds on the image, with 11 fewer lines of configuration here.
+- Do not read the totals as ordering the two. They came out at 78 seconds for `automode`
+  against 66 for `soci`, and that difference is in provisioning rather than in the image
+  stage, which is not what either mechanism changes. In an earlier run on a different
+  instance type the two differed by 15 MB/s on the image stage, in the other direction.
+  What is consistent across runs is the difference in the amount of configuration.
 - This variant runs on a different control plane. The VPC, subnets and instance type are
   the same, so the image pull path is the same, but the comparison with the other three is
   not a direct one.
@@ -174,7 +174,7 @@ spec:
 コンテナデータを NVMe に置きます。NVMe 容量以上の値にすると、EBS ボリュームを付けず、NVMe を
 ワークロードに割り当てます。
 
-`g6.8xlarge` のインスタンスストアは 2 本合計 900 GB なので `80Gi` はそれより小さい値です。
+`gr6.8xlarge` のインスタンスストアは 2 本合計 900 GB なので `80Gi` はそれより小さい値です。
 インスタンスタイプを変更する場合は、この値を再確認してください。コンテナストレージの配置先を
 決める設定です。比較対象はインスタンスストアの合計容量で、1 本の容量ではありません。
 
@@ -221,11 +221,12 @@ NVMe の設定がサービス側で行われたことが分かります。
 
 ## 数字から分かること
 
-- 参考計測ではこの variant は 164 MB/s で、ステップ 3 は 151 MB/s でした。設定は 11 行少ない
-  状態です。
-- `soci` と `automode` の差は実行ごとのばらつきの範囲内です。参考計測にはフェーズ 1 の
-  2 回分が含まれており、1 回目は両方 89 秒、2 回目は 97 秒と 94 秒でした。両者の順序は一定で
-  ないため、時間の数字からどちらが速いとは言えません。設定量の差は一定です。
+- 参考計測ではこの variant とステップ 3 はどちらも 267 MB/s、イメージ段階はどちらも 35 秒で、
+  設定はこちらが 11 行少ない状態です。
+- 合計から両者の順位を読まないでください。`automode` が 78 秒、`soci` が 66 秒でしたが、その差は
+  イメージ段階ではなくプロビジョニングにあり、どちらの機構も変えていない部分です。別の
+  インスタンスタイプでの以前の実行では、イメージ段階で 15 MB/s の差が逆向きに出ています。実行間で
+  一定なのは設定量の差です。
 - この variant はコントロールプレーンが異なります。VPC、サブネット、インスタンスタイプは
   同じでイメージ pull の経路も同じですが、他の 3 つとの比較は直接的なものではありません。
 

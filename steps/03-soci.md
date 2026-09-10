@@ -85,12 +85,12 @@ worth checking for your own type rather than assuming.
 | 1 | **No array.** The device is formatted XFS directly |
 | 0 | `init` logs that it found no ephemeral disks and exits successfully. `bind` then has nothing to bind, the setting fails quietly rather than failing the node, and this variant measures the same thing as step 1 |
 
-`g6.8xlarge` has two 450 GB NVMe SSDs, so the array is real here. `g6.4xlarge` and most of
+`gr6.8xlarge` has two 450 GB NVMe SSDs, so the array is real here. `g6.4xlarge` and most of
 the smaller G types have one, where the policy still moves container storage to the instance
 store but nothing is striped. Check before you draw a conclusion from a throughput figure:
 
 ```bash
-aws ec2 describe-instance-types --instance-types g6.8xlarge \
+aws ec2 describe-instance-types --instance-types gr6.8xlarge \
   --query 'InstanceTypes[0].InstanceStorageInfo.Disks'
 ```
 
@@ -103,9 +103,6 @@ skips the array when it would have one member. What the policy promises holds ei
 container and kubelet state on the instance store, and allocatable ephemeral-storage equal to
 the instance store's total size.
 
-If the instance type has no instance store at all, `init` logs that it found no ephemeral
-disks and exits successfully, and `bind` then has nothing to bind. The setting fails quietly
-rather than failing the node, and the variant would measure the same thing as step 1.
 
 `bind` with no `--dirs` argument binds Bottlerocket's allow list of bindable directories,
 which is assembled from drop-in files under `/usr/lib/bottlerocket/ephemeral-storage.d`.
@@ -294,7 +291,7 @@ EBS ボリュームではなくインスタンスストアに向きます。
 | 1 本 | **アレイを作りません。** デバイスを直接 XFS でフォーマット |
 | 0 本 | `init` は ephemeral disk が見つからないと記録して正常終了。`bind` はバインド対象を持たず、設定はノードを失敗させずに静かに無効となり、この variant はステップ 1 と同じものを計測する |
 
-`g6.8xlarge` は 450 GB の NVMe SSD が 2 本なので、ここではアレイが実際に作られます。
+`gr6.8xlarge` は 450 GB の NVMe SSD が 2 本なので、ここではアレイが実際に作られます。
 `g6.4xlarge` や小さめの G 系は 1 本で、ポリシーはコンテナストレージをインスタンスストアに
 移しますが、ストライピングは発生しません。スループットの数字から結論を出す前に確認して
 ください。

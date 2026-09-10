@@ -205,6 +205,62 @@ def vllm_timings(log_text):
         if matches:
             # Last occurrence: on a restart the later one is the run that succeeded.
             found[key] = float(matches[-1])
+
+    # Phase 3: did the compile cache get used, or did this run compile?
+    #
+    # Read from the log rather than inferred from the timing. A short compile time is
+    # consistent with a cache hit but also with a smaller model or a different
+    # compilation configuration, and the point of the phase is to attribute the
+    # difference to the cache specifically.
+    #
+    # These are the lines vLLM 0.22 emits when it has to compile:
+    #   backends.py  Cache the graph of compile range (1, 2048) for later use
+    #   backends.py  Compiling a graph for compile range (1, 2048) takes 7.22 s
+    #   decorators.py saved AOT compiled function to <path>
+    miss_markers = [
+        r"Compiling a graph for compile range [^\n]*takes",
+        r"saved AOT compiled function to",
+        r"Cache the graph of compile range [^\n]*for later use",
+    ]
+    # And when it can reuse them. Kept as a list because the wording has changed
+    # between vLLM releases; a new release that renames these should be caught by the
+    # miss markers being absent, not by this list being complete.
+    hit_markers = [
+        r"Directly load the compiled graph",
+        r"Loading AOT compiled function from",
+        r"Directly lo[a]?d.*from the cache",
+    ]
+
+    def matched_lines(patterns):
+        """The log lines themselves, not the patterns. Someone checking the verdict wants
+        to read what vLLM said."""
+        out = []
+        for line in log_text.splitlines():
+            for pattern in patterns:
+                if re.search(pattern, line):
+                    # Drop the "(EngineCore pid=242) INFO 09-10 02:23:20 [backends.py:292]"
+                    # prefix so the evidence is readable in a report.
+                    out.append(re.sub(r"^.*?\[[a-z_]+\.py:\d+\]\s*", "", line).strip())
+                    break
+        return out
+
+    compiled = matched_lines(miss_markers)
+    reused = matched_lines(hit_markers)
+
+    if re.search(r"for vLLM's torch\.compile", log_text):
+        # Only claim either state when the cache directory line is present, which
+        # confirms compilation was configured at all.
+        if compiled:
+            found["compile_cache"] = "miss"
+        elif reused:
+            found["compile_cache"] = "hit"
+        else:
+            # Nothing compiled and nothing announced a reuse. Report it rather than
+            # guessing, so a wording change in vLLM shows up as unknown instead of as
+            # a silently wrong verdict.
+            found["compile_cache"] = "unknown"
+        found["compile_cache_evidence"] = compiled + reused
+
     return found
 
 
@@ -516,6 +572,20 @@ def main() -> int:
                 f"    reading the weights is {share:.1f}% of start to Ready -- "
                 "a faster loader can only move this part"
             )
+
+        # Phase 3. Read from the log, so the verdict does not rest on the timing being
+        # short -- which is also what a different compilation configuration looks like.
+        verdict = vllm.get("compile_cache")
+        if verdict:
+            print()
+            label = {
+                "hit": "compile cache HIT -- artifacts reused, compilation skipped",
+                "miss": "compile cache MISS -- this run compiled and saved the artifacts",
+                "unknown": "compile cache UNKNOWN -- vLLM logged neither a compile nor a reuse",
+            }[verdict]
+            print(f"  {label}")
+            for line in vllm.get("compile_cache_evidence") or []:
+                print(f"    {line}")
 
     if ttft.get("ttft_seconds") is not None:
         print()

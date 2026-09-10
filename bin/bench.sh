@@ -42,6 +42,7 @@ usage() {
   echo "usage:" >&2
   echo "  bench.sh <baseline|snapshot|soci|automode> [--warm]" >&2
   echo "  bench.sh weights <s3-initcontainer|runai-local|runai-s3>" >&2
+  echo "  bench.sh compile <cold|warm>" >&2
   exit 2
 }
 
@@ -61,6 +62,17 @@ case "${TARGET}" in
     NODEPOOL="soci"
     POD="bench-weights-${VARIANT}"
     RUN_NAME="weights-${VARIANT}"
+    ;;
+  compile)
+    VARIANT="${MODE}"
+    case "${VARIANT}" in
+      cold|warm) ;;
+      *) usage ;;
+    esac
+    CONTEXT="${KARPENTER_CLUSTER}"
+    NODEPOOL="soci"
+    POD="bench-compile-${VARIANT}"
+    RUN_NAME="compile-${VARIANT}"
     ;;
   automode|baseline|snapshot|soci)
     [[ -n "${MODE}" && "${MODE}" != "--warm" ]] && usage
@@ -112,9 +124,9 @@ if [[ "${WARM}" == true ]]; then
   else
     echo "    ${NODE_COUNT} node(s) still up, image should be cached"
   fi
-elif [[ "${TARGET}" == "weights" ]]; then
-  # Phase 2 compares loaders, not provisioning. Reuse the warm soci node so the
-  # image pull does not swamp the numbers we are trying to see.
+elif [[ "${TARGET}" == "weights" || "${TARGET}" == "compile" ]]; then
+  # Phases 2 and 3 compare what happens inside the pod, not provisioning. Reuse the warm
+  # soci node so the image pull does not swamp the numbers we are trying to see.
   echo "==> reusing the soci node if it is up (this compares loaders, not nodes)"
   kubectl --context "${CONTEXT}" -n bench delete pod \
     -l "workshop-variant=${NODEPOOL}" --ignore-not-found --wait=true --timeout=180s >/dev/null 2>&1 || true
@@ -170,6 +182,44 @@ if [[ "${TARGET}" == "weights" ]]; then
     "REGION=${REGION}" \
     "VLLM_MODEL_ARG=${VLLM_MODEL_ARG}" \
     "VLLM_LOAD_ARGS=${VLLM_LOAD_ARGS}"
+elif [[ "${TARGET}" == "compile" ]]; then
+  if [[ -z "${MODEL_BUCKET}" ]]; then
+    echo "MODEL_BUCKET is unset in config.env -- run snapshot/stage-model.sh first" >&2
+    exit 1
+  fi
+
+  # The cache directory on the node. cold picks a subdirectory no run has used and
+  # records it; warm reuses the one cold recorded. Anything else and the two runs would
+  # not be looking at the same cache, and neither figure would mean what it says.
+  CACHE_ID_FILE="${RESULTS_DIR}/compile-cache-id.txt"
+  if [[ "${VARIANT}" == "cold" ]]; then
+    CACHE_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+    mkdir -p "${RESULTS_DIR}"
+    printf '%s\n' "${CACHE_ID}" > "${CACHE_ID_FILE}"
+    echo "==> cold run: new cache directory /var/lib/vllm-compile-cache/${CACHE_ID}"
+  else
+    if [[ ! -f "${CACHE_ID_FILE}" ]]; then
+      echo "no cold run recorded. Run 'bin/bench.sh compile cold' first -- the warm run" >&2
+      echo "reuses the cache directory that the cold run created." >&2
+      exit 1
+    fi
+    CACHE_ID="$(tr -d '[:space:]' < "${CACHE_ID_FILE}")"
+    echo "==> warm run: reusing /var/lib/vllm-compile-cache/${CACHE_ID}"
+  fi
+
+  MANIFEST="${RAW}/workload.yaml"
+  sed \
+    -e "s|@VARIANT@|${VARIANT}|g" \
+    -e "s|@IMAGE@|${WORKLOAD_IMAGE}|g" \
+    -e "s|@MODEL_NAME@|${MODEL_NAME}|g" \
+    -e "s|@MODEL_BUCKET@|${MODEL_BUCKET}|g" \
+    -e "s|@MODEL_PREFIX@|${MODEL_PREFIX}|g" \
+    -e "s|@REGION@|${REGION}|g" \
+    -e "s|@RUNAI_CONCURRENCY@|${RUNAI_CONCURRENCY_S3}|g" \
+    -e "s|@CACHE_ID@|${CACHE_ID}|g" \
+    "${ROOT}/manifests/workload-compile.yaml" > "${MANIFEST}"
+
+  printf '%s\n' "${CACHE_ID}" > "${RAW}/compile-cache-id.txt"
 else
   MANIFEST="${RAW}/workload.yaml"
   sed \
@@ -201,13 +251,13 @@ if [[ ${WATCH_RC} -ne 0 ]]; then
 fi
 
 ################################################################################
-# Time to first token (phase 2 only)
+# Time to first token (phases 2 and 3)
 #
 # Ready means /health returns 200. It does not mean the server will produce a
 # token promptly, and on a cold CUDA graph it may not. Measured from inside the
 # pod, so no port-forward and no assumption about curl being in the image.
 ################################################################################
-if [[ "${TARGET}" == "weights" && ${WATCH_RC} -eq 0 ]]; then
+if [[ ( "${TARGET}" == "weights" || "${TARGET}" == "compile" ) && ${WATCH_RC} -eq 0 ]]; then
   echo "==> measuring time to first token"
   set +e
   kubectl --context "${CONTEXT}" -n bench exec "${POD}" -c vllm -- \

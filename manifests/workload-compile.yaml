@@ -1,0 +1,119 @@
+################################################################################
+# Phase 3 -- section 5: reusing vLLM's compiled artifacts across pods.
+#
+# Phase 2 ended with engine initialisation as the largest remaining stage, and
+# vLLM reports how much of it is compilation:
+#
+#   init engine (profile, create kv cache, warmup model) took 27.77 s (compilation: 14.55 s)
+#
+# Compilation produces artifacts that vLLM can reuse. It writes them under
+# /root/.cache/vllm/torch_compile_cache, which is inside the container's writable
+# layer by default, so a replacement pod starts with an empty cache and compiles
+# again. This manifest mounts that directory from the node instead.
+#
+# Two runs, selected by bench.sh:
+#
+#   cold   a hostPath subdirectory that no run has used before. Compilation runs
+#          and the artifacts are written. This is the cost of compiling.
+#
+#   warm   the same subdirectory as the preceding cold run, with the pod replaced
+#          and the node kept. The artifacts are already there.
+#
+# Only the state of that directory differs. Model, image, GPU, loader and every
+# vLLM argument are identical, which is what makes the difference attributable to
+# the cache.
+#
+# WHY ONLY torch_compile_cache AND NOT THE WHOLE CACHE ROOT
+#
+# Run:ai Model Streamer also caches under /root/.cache/vllm -- the engine log
+# shows it reading the model from /root/.cache/vllm/assets/model_streamer/<hash>.
+# Mounting the whole root would persist the model as well, so the warm run would
+# skip the S3 read too and the measurement would combine two effects. Mounting
+# only torch_compile_cache keeps the weights coming from S3 on both runs.
+#
+# The loader is runai-s3, the fastest of the three in phase 2, so what remains in
+# the total is dominated by the engine stage this phase is about.
+#
+# bench.sh substitutes @VARIANT@, @IMAGE@, @MODEL_NAME@, @MODEL_BUCKET@,
+# @MODEL_PREFIX@, @REGION@, @RUNAI_CONCURRENCY@ and @CACHE_ID@.
+################################################################################
+apiVersion: v1
+kind: Pod
+metadata:
+  name: "bench-compile-@VARIANT@"
+  namespace: bench
+  labels:
+    app: bench
+    workshop-variant: soci
+    phase: compile
+    variant: "@VARIANT@"
+spec:
+  restartPolicy: Never
+  terminationGracePeriodSeconds: 0
+  serviceAccountName: bench
+  nodeSelector:
+    workshop-variant: soci
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  volumes:
+    - name: probe
+      configMap:
+        name: ttft-probe
+    - name: shm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 4Gi
+    # The compile cache, kept on the node so it outlives the pod.
+    #
+    # This path is not in Bottlerocket's ephemeral-storage allow list, so
+    # instanceStorePolicy: RAID0 does not bind it to the instance store and it stays
+    # on the EBS data volume. Either location outlives the pod, which is all this
+    # measurement needs. It does not outlive the node -- that is the third test
+    # described in steps/07-compile-cache.md.
+    - name: compile-cache
+      hostPath:
+        path: "/var/lib/vllm-compile-cache/@CACHE_ID@"
+        type: DirectoryOrCreate
+  containers:
+    - name: vllm
+      image: "@IMAGE@"
+      imagePullPolicy: IfNotPresent
+      command: ["bash", "-c"]
+      args:
+        - |
+          echo "compile cache contents before start:"
+          ls -la /root/.cache/vllm/torch_compile_cache 2>&1 | head -20
+          exec python3 -m vllm.entrypoints.openai.api_server \
+            --model s3://@MODEL_BUCKET@/@MODEL_PREFIX@ \
+            --served-model-name @MODEL_NAME@ \
+            --load-format runai_streamer \
+            --model-loader-extra-config '{"concurrency":@RUNAI_CONCURRENCY@}' \
+            --max-model-len 4096 \
+            --gpu-memory-utilization 0.85 \
+            --port 8000
+      env:
+        - name: AWS_REGION
+          value: "@REGION@"
+        - name: AWS_DEFAULT_REGION
+          value: "@REGION@"
+      readinessProbe:
+        httpGet:
+          path: /health
+          port: 8000
+        initialDelaySeconds: 5
+        periodSeconds: 2
+        failureThreshold: 300
+      resources:
+        requests:
+          nvidia.com/gpu: 1
+        limits:
+          nvidia.com/gpu: 1
+      volumeMounts:
+        - name: probe
+          mountPath: /probe
+        - name: shm
+          mountPath: /dev/shm
+        - name: compile-cache
+          mountPath: /root/.cache/vllm/torch_compile_cache

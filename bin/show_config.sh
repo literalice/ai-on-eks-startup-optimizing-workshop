@@ -200,6 +200,44 @@ case "${VARIANT}" in
     plain "    bin/check_runai.sh"
     ;;
 
+  compile)
+    heading "Phase 3 -- keeping vLLM's compiled artifacts on the node"
+    plain ""
+    plain "  Loader, model, image, GPU and every vLLM argument are the same as"
+    plain "  runai-s3 in phase 2. One volume is added:"
+    plain ""
+    why "The volume"
+    plain "     volumes:"
+    plain "       - name: compile-cache"
+    plain "         hostPath:"
+    plain "           path: /var/lib/vllm-compile-cache/<CACHE_ID>"
+    plain "           type: DirectoryOrCreate"
+    plain ""
+    plain "     volumeMounts:"
+    plain "       - name: compile-cache"
+    plain "         mountPath: /root/.cache/vllm/torch_compile_cache"
+    plain ""
+    warn "The mount is on torch_compile_cache, NOT on /root/.cache/vllm."
+    plain "    Run:ai Model Streamer caches the model under the same root -- the engine"
+    plain "    log shows it reading from /root/.cache/vllm/assets/model_streamer/<hash>."
+    plain "    Mounting the whole root would persist the weights as well, the warm run"
+    plain "    would skip the S3 read too, and the saving could not be attributed to"
+    plain "    compilation. Check the model load figure in both runs: if it stays the"
+    plain "    same, the weights still came from S3."
+    plain ""
+    why "The two runs differ only in the state of that directory"
+    plain "     cold  a subdirectory no run has used. Compilation runs and writes it."
+    plain "     warm  the same subdirectory, pod replaced, node kept."
+    plain ""
+    plain "  cold records the directory it chose in results/compile-cache-id.txt, and"
+    plain "  warm reads it back, so both runs are looking at the same cache."
+    plain ""
+    why "Where it lands on Bottlerocket"
+    plain "    /var/lib/vllm-compile-cache is not in Bottlerocket's allow list of"
+    plain "    bindable directories, so instanceStorePolicy: RAID0 leaves it on the EBS"
+    plain "    data volume. Either location outlives the pod. Neither outlives the node."
+    ;;
+
   *) usage ;;
 esac
 

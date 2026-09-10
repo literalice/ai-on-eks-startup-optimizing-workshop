@@ -42,6 +42,8 @@ fi
 echo "==> probing ${TYPE} in ${#SUBNETS[@]} subnet(s)"
 FAILED=0
 IDS=()
+ERRFILE="$(mktemp -t capacity-probe)"
+trap 'rm -f "${ERRFILE}"' EXIT
 
 for row in "${SUBNETS[@]}"; do
   read -r subnet zone <<<"${row}"
@@ -51,12 +53,16 @@ for row in "${SUBNETS[@]}"; do
       --instance-type "${TYPE}" \
       --subnet-id "${subnet}" \
       --tag-specifications 'ResourceType=instance,Tags=[{Key=purpose,Value=capacity-probe}]' \
-      --query 'Instances[0].InstanceId' --output text 2>/tmp/capacity-probe-err)"; then
+      --query 'Instances[0].InstanceId' --output text 2>"${ERRFILE}")"; then
     echo "OK (${ID})"
     IDS+=("${ID}")
   else
-    REASON="$(grep -oE 'InsufficientInstanceCapacity|Unsupported|VcpuLimitExceeded|[A-Za-z]+LimitExceeded' /tmp/capacity-probe-err | head -1)"
-    echo "FAILED ${REASON:-see /tmp/capacity-probe-err}"
+    echo "FAILED"
+    # Print what EC2 said rather than a keyword matched out of it. The message names the
+    # error code and, for a capacity failure, lists the Availability Zones that can serve
+    # the request right now -- which is the part you act on. A keyword match would also
+    # hide an unexpected failure such as VcpuLimitExceeded behind a capacity story.
+    sed 's/^/               /' "${ERRFILE}"
     FAILED=$((FAILED + 1))
   fi
 done
@@ -74,7 +80,15 @@ if [[ ${FAILED} -eq 0 ]]; then
 fi
 
 echo "${FAILED} of ${#SUBNETS[@]} subnet(s) could not launch ${TYPE}."
-echo "Karpenter will hold those offerings unavailable for 3 minutes at a time, which shows"
-echo "up as a long \"Karpenter decision\" segment. Wait, or set GPU_INSTANCE_TYPE to a type"
-echo "with capacity and re-baseline every variant."
+echo
+echo "Capacity is per instance type per Availability Zone, so this does not mean the region is"
+echo "out of GPUs, and Karpenter can still succeed by choosing one of the zones that worked."
+echo "What it does mean is that Karpenter may try a starved zone first and then hold that"
+echo "offering unavailable for 3 minutes, and the pod waits out the TTL before a NodeClaim is"
+echo "created. That wait is added to the variant's total as a long \"Karpenter decision\""
+echo "segment, with no error to explain it."
+echo
+echo "For a measurement run, either wait and probe again -- this changes within minutes -- or"
+echo "set GPU_INSTANCE_TYPE to a type that has capacity in every zone and re-measure every"
+echo "variant on it, because a soci figure does not carry across instance types."
 exit 1

@@ -2,8 +2,10 @@
 
 **English** | [日本語](#japanese)
 
-Goal: measure what determines startup time once the image pull is no longer the largest
-stage. Includes Run:ai Model Streamer and time to first token.
+Steps 1 to 4 made the image pull smaller. This step measures what is left once the pull is no
+longer the largest stage, which for an inference server is the work of getting the model
+weights into GPU memory. Three variants are run, one of which uses Run:ai Model Streamer, and
+each run also measures the time until the server produces its first token.
 
 ---
 
@@ -14,21 +16,28 @@ stage. Includes Run:ai Model Streamer and time to first token.
 snapshot/stage-model.sh
 ```
 
-This downloads the model from Hugging Face and uploads it to S3, excluding the `.bin`
-files, which are the same weights in an older format.
+This downloads the model from Hugging Face and uploads it to S3. It skips the `.bin` files,
+because those hold the same weights in an older format and would double the transfer for no
+benefit.
 
-> Use one `--exclude` flag per pattern. The flag takes a single value. If several values
-> follow one flag, the CLI treats them as filenames to download, prints "Ignoring
-> `--exclude` since filenames have being explicitly set", exits with status 0 and downloads
-> nothing.
+> If you adapt this script, give each exclude pattern its own `--exclude` flag. The flag takes
+> one value. When several values follow a single flag, the CLI reads the extra ones as names of
+> files to download instead, prints "Ignoring `--exclude` since filenames have being explicitly
+> set", and exits with status 0 having downloaded nothing. The exit code makes this easy to
+> miss.
 
 ---
 
 ## The three variants
 
-The pod spec, node, model and bytes are the same in all three. The vLLM arguments differ.
-There are three rather than two because the loader and the delivery method are separate
-variables.
+All three run on the same node, with the same pod spec, the same model and the same number of
+bytes. Only the vLLM arguments change between them.
+
+There are three variants rather than two because two independent things can be changed here.
+One is the loader, meaning the code that reads the safetensors files. The other is the
+delivery, meaning whether those files are copied to local disk first or read from S3 as the
+loader needs them. Changing both at once would leave no way to tell which of the two moved the
+result, so each variant changes one of them.
 
 ### Variant 1 — `s3-initcontainer`
 
@@ -80,38 +89,48 @@ variables.
             ...
 ```
 
-| Comparison | What it isolates |
-|---|---|
-| 1 to 2 | The loader. The bytes and the disk are the same, so the difference is the effect of concurrent tensor streaming. |
-| 2 to 3 | The delivery. The copy step is removed. |
+| Comparison | What changes | What it isolates |
+|---|---|---|
+| 1 to 2 | The loader only | The same bytes sit on the same disk in both, so any difference comes from reading them concurrently rather than one tensor at a time. |
+| 2 to 3 | The delivery only | The copy step is removed, so any difference comes from where the loader reads from. |
 
-Reporting the two comparisons separately shows which of the two changes produced any
-difference in the total.
+The report keeps these two comparisons apart. If they were combined, an improvement from
+removing the copy could be read as evidence that the loader is faster, or the other way
+around.
 
 ---
 
-## Two configuration details
+## Two things about the configuration that are easy to get wrong
 
-### 1. Credentials come from Pod Identity
+### 1. Credentials come from Pod Identity, not from the node role
 
 ```yaml
 spec:
   serviceAccountName: bench     # bound to an IAM role by EKS Pod Identity
 ```
 
-Karpenter sets the IMDS hop limit to 1, so a container cannot reach instance metadata. Using
-the node role results in `Unable to locate credentials`. The hop limit prevents pods from
-using node permissions, and binding a role to a service account is the approach to use in
-production. See `aws_eks_pod_identity_association` in
+The obvious approach is to give the node role access to the bucket and let the container pick
+up credentials from instance metadata. That does not work on a Karpenter node, because
+Karpenter sets the IMDS hop limit to 1. With a hop limit of 1, a request from inside a
+container is one hop too far, so the container cannot reach the metadata service and the AWS
+SDK reports `Unable to locate credentials`.
+
+The hop limit is worth keeping. It is what stops a pod from borrowing the node's permissions.
+Binding a role to a service account instead is both what makes this work here and what to do
+in production. The binding is `aws_eks_pod_identity_association` in
 [`terraform/main.tf`](../terraform/main.tf).
 
-### 2. The init container runs before the image pull
+### 2. The init container delays the workload image pull
 
-kubelet pulls the init image, runs the init container, and then pulls the workload image.
-The copy and the image pull do not overlap.
+kubelet does these in order: it pulls the init container's image, runs the init container to
+completion, and only then pulls the workload image. The copy and the image pull never overlap.
 
-Because of this, moving weights out of the image can increase start-to-Ready time even
-though the image is smaller. Variant 3 removes the copy step.
+This has a consequence worth stating plainly, because it runs against the usual reasoning.
+Moving the weights out of the container image makes the image smaller, and a smaller image
+pulls faster. But if the weights are then fetched by an init container, the time saved on the
+pull is spent before the pull starts, and start-to-Ready can come out higher than it was with
+the weights baked in. Variant 3 avoids this by removing the init container: vLLM reads the
+weights itself, while the workload image has already been pulled.
 
 ---
 
@@ -126,9 +145,11 @@ bin/bench.sh weights runai-s3
 bin/report.py
 ```
 
-`runai-streamer` and its S3 backend are included in the AWS vLLM Deep Learning Container
-base image. It is Apache-2.0 licensed, so no installation or licence is required.
-`check_runai.sh` checks the tag you configured, using a node that already has the image.
+There is nothing to install for this. `runai-streamer` and its S3 backend are already in the
+AWS vLLM Deep Learning Container base image, and the project is Apache-2.0 licensed, so no
+licence is needed either. `check_runai.sh` confirms it is present in the specific tag you
+configured, and it runs against a node that already has the image so that the check takes
+seconds rather than a multi-gigabyte pull.
 
 ---
 
@@ -138,8 +159,9 @@ base image. It is Apache-2.0 licensed, so no installation or licence is required
 bin/verify_config.sh weights
 ```
 
-This reports which loader the pod started with, whether the model was read from `/models`
-or from `s3://`, and the startup timings from vLLM's log.
+This reads back three things from the run rather than assuming them: which loader the pod
+actually started with, whether the model came from `/models` or straight from `s3://`, and the
+startup timings that vLLM itself logged.
 
 ---
 
@@ -147,38 +169,59 @@ or from `s3://`, and the startup timings from vLLM's log.
 
 | Variant | Ready | TTFT after Ready | Submit to first token |
 |---|---:|---:|---:|
-| `s3-initcontainer` | 96s | 0.65s | 96.6s |
-| `runai-local` | 93s | 0.65s | 93.6s |
-| `runai-s3` | 82s | 0.65s | 82.6s |
+| `s3-initcontainer` | 95s | 0.66s | 95.7s |
+| `runai-local` | 92s | 0.66s | 92.7s |
+| `runai-s3` | 84s | 0.66s | 84.7s |
 
 ### Changing the loader did not change the total
 
 Variants 1 and 2 produced the same total. vLLM's log gives the reason:
 
 ```
-Loading weights took 0.31 seconds
-torch.compile took 14.8 s in total
-init engine (profile, create kv cache, warmup) took 28.2 s
+Loading weights took 0.30 seconds
+Model loading took 2.98 GiB memory and 0.616735 seconds
+torch.compile took 14.75 s in total
 Graph capturing finished in 4 secs
+init engine (profile, create kv cache, warmup model) took 28.01 s (compilation: 14.75 s)
 ```
 
-Reading the weights took 0.31 seconds out of 96. A loader that reads them faster can only
-affect that 0.31 seconds. Without these log lines the comparison would show only that the
-total did not change, which does not indicate whether the loader was slow or whether reading
-the weights was already a small part of the startup time.
+Reading the weights took 0.30 seconds of a 95-second startup. A loader that reads them faster
+has only those 0.30 seconds to work with, so there was very little for it to improve.
+
+This is why the log lines matter more than the total here. On the totals alone, the result
+looks like a claim that Run:ai Model Streamer does not help. The log shows something different:
+at this model size the loader was never the constraint, and the same change on a model where
+weight reading takes tens of seconds could look quite different.
 
 ### Changing the delivery reduced the total
 
-Variant 3 removed the init container and the total went from 96 to 82 seconds. The model
-load time increased from 0.63 to 3.36 seconds, so reading from S3 is slower per tensor than
-reading from local disk. The reduction comes from removing the copy step, which took about
-10 seconds.
+Variant 3 removed the init container, and the total came down from 95 seconds to 84.
 
-### Compilation and warmup were the largest components
+The saving did not come from reading the weights faster. It came from removing a step. In fact
+the model load time went up, from 0.62 seconds to 2.71, because reading from S3 is slower per
+tensor than reading from a local disk. What disappeared was the copy, which took around 11
+seconds and, as described above, ran before the workload image pull rather than alongside it.
 
-`torch.compile` at 14.7 seconds, engine init at 27.9 seconds and graph capture at 4 seconds
-account for about 47 of the 82 seconds. Neither the loader nor the delivery method affects
-these. Caching compiled artifacts would.
+### Engine initialisation was the largest component
+
+Engine initialisation took 28.0 of the 84 seconds.
+
+Read that figure carefully, because the log lines above are nested rather than additive. vLLM
+states the nesting on the line itself:
+
+```
+init engine (profile, create kv cache, warmup model) took 27.98 s (compilation: 14.76 s)
+```
+
+The 14.76 seconds of `torch.compile` and the 4 seconds of graph capture happen inside those
+28.0 seconds. They are not three stages to add together, and adding them would count
+compilation twice.
+
+Nothing in this step affects that stage. Neither loader touches it and neither delivery method
+touches it. Reusing compiled artifacts affects part of it, up to the 14.76 seconds of
+compilation, and leaves the profiling, KV-cache creation and warmup that account for the
+remainder. That makes compilation the largest item still open at the end of this step, and
+[step 7](07-compile-cache.md) measures it.
 
 ### At a larger model size
 
@@ -186,6 +229,28 @@ The model used here is 1.5B parameters, about 2.9 GB. Run:ai's published benchma
 15 GB model, where the loader accounts for a larger share of the startup time. Set
 `MODEL_HF_REPO` in `config.env` to a larger model to measure that case. If the models you
 run are large, the result may differ from the one above.
+
+### How the weights get to the node
+
+One part of the path is set up by Terraform rather than by anything in this step, and it is
+worth knowing it is there before reading the download figures.
+
+The VPC has private subnets and a single NAT gateway, and it also has an S3 Gateway VPC
+endpoint. The endpoint adds a route for the regional S3 prefix list to the private route
+tables. That route is more specific than the default route, so it wins, and S3 traffic does not
+go through NAT. This applies to the weights here, and also to the container image layers in the
+earlier steps, because ECR stores layers in S3.
+
+Two things this does not do. It does not promise a faster download: at the rate a single node
+pulls here, NAT was never close to its limit, and the case where the endpoint matters is many
+nodes scaling out through one NAT gateway at the same time. It also does not change an
+unencrypted connection into an encrypted one, since both paths can use HTTPS. What it removes
+is the NAT data-processing charge and the dependency on NAT.
+
+If the goal is to take the image pull off NAT completely, the gateway endpoint is not
+sufficient on its own. It covers the layer download, but the registry API calls do not go to
+S3. Those need `ecr.api` and `ecr.dkr` interface endpoints, which are billed per hour and per
+GB, unlike the gateway endpoint which is free.
 
 ---
 
@@ -216,8 +281,10 @@ Back to: [README](../README.md#what-to-adopt)
 
 [English](#step-6--how-the-model-weights-reach-gpu-memory) | **日本語**
 
-目的: イメージ pull が最大の段階でなくなった後、起動時間を決めるものを計測します。Run:ai
-Model Streamer と time to first token を含みます。
+ステップ 1 から 4 でイメージ pull は小さくなりました。このステップでは、pull が最大の段階で
+なくなった後に何が残るかを計測します。推論サーバーの場合、それはモデルウェイトを GPU メモリに
+載せるまでの作業です。3 通りの構成を実行し、そのうち 1 つで Run:ai Model Streamer を使います。
+また各実行では、サーバーが最初のトークンを出すまでの時間も計測します。
 
 ---
 
@@ -228,20 +295,26 @@ Model Streamer と time to first token を含みます。
 snapshot/stage-model.sh
 ```
 
-Hugging Face からモデルを取得して S3 にアップロードします。`.bin` ファイルは同じウェイトの
-旧形式なので除外します。
+Hugging Face からモデルを取得して S3 にアップロードします。`.bin` ファイルは除外します。
+同じウェイトの旧形式であり、含めても転送量が倍になるだけで得るものがないためです。
 
-> `--exclude` は 1 パターンごとに 1 つ指定してください。このフラグは値を 1 つ取ります。1 つの
-> フラグの後に値を複数並べると、CLI はそれらをダウンロード対象のファイル名として扱い、
-> "Ignoring `--exclude` since filenames have being explicitly set" を出力し、終了ステータス
-> 0 で何もダウンロードしません。
+> このスクリプトを流用する場合、除外パターンは 1 つごとに `--exclude` を付けてください。この
+> フラグが取る値は 1 つです。1 つのフラグの後に値を複数並べると、CLI は 2 つ目以降をダウンロード
+> 対象のファイル名として読み、"Ignoring `--exclude` since filenames have being explicitly set"
+> を出力して、何もダウンロードせずステータス 0 で終了します。終了コードが 0 なので気づきにくい
+> 失敗です。
 
 ---
 
 ## 3 通りの構成
 
-Pod spec、ノード、モデル、バイト列は 3 つとも同じで、vLLM の引数が異なります。3 つあるのは、
-ローダーと配送方法が別々の変数だからです。
+3 つとも同じノード上で、同じ Pod spec、同じモデル、同じバイト数で実行します。変わるのは vLLM
+の引数だけです。
+
+構成が 2 つではなく 3 つあるのは、ここで変えられるものが独立に 2 つあるためです。1 つはローダー、
+つまり safetensors ファイルを読むコードです。もう 1 つは配送、つまりそのファイルを先にローカル
+ディスクへコピーするか、ローダーが必要とするタイミングで S3 から読むかです。両方を同時に変えると
+どちらが結果を動かしたのか判別できなくなるため、各構成では片方だけを変えます。
 
 ### variant 1 — `s3-initcontainer`
 
@@ -293,37 +366,45 @@ Pod spec、ノード、モデル、バイト列は 3 つとも同じで、vLLM �
             ...
 ```
 
-| 比較 | 切り分ける対象 |
-|---|---|
-| 1 から 2 | ローダー。バイト列とディスクは同じなので、差は並列テンソルストリーミングの効果です。 |
-| 2 から 3 | 配送。コピー工程が無くなります。 |
+| 比較 | 変わるもの | 切り分けられること |
+|---|---|---|
+| 1 から 2 | ローダーだけ | 同じバイト列が同じディスク上にあるため、差はテンソルを 1 つずつではなく並列に読むことから生じます。 |
+| 2 から 3 | 配送だけ | コピー工程が無くなるため、差はローダーがどこから読むかから生じます。 |
 
-2 つの比較を別に報告することで、合計の差がどちらの変更によるものかが分かります。
+レポートはこの 2 つの比較を分けて出します。まとめてしまうと、コピー工程を無くしたことによる短縮を
+ローダーが速いことの根拠と読んでしまう、あるいはその逆が起こります。
 
 ---
 
-## 設定上の 2 点
+## 設定で間違えやすい 2 点
 
-### 1. 認証情報は Pod Identity から取得
+### 1. 認証情報はノードロールではなく Pod Identity から取得する
 
 ```yaml
 spec:
   serviceAccountName: bench     # EKS Pod Identity で IAM ロールに紐付け
 ```
 
-Karpenter は IMDS の hop limit を 1 に設定するため、コンテナはインスタンスメタデータに到達
-できません。ノードロールを使うと `Unable to locate credentials` になります。この hop limit は
-Pod がノードの権限を使うことを防ぐもので、サービスアカウントにロールを紐付ける方法は本番でも
-使えます。[`terraform/main.tf`](../terraform/main.tf) の
-`aws_eks_pod_identity_association` を参照してください。
+思いつきやすいのは、ノードロールにバケットへのアクセスを与え、コンテナがインスタンスメタデータ
+から認証情報を取得する方法です。しかし Karpenter のノードではこれが動きません。Karpenter が IMDS
+の hop limit を 1 に設定するためです。hop limit が 1 の場合、コンテナ内からのリクエストは 1 hop
+超過となり、メタデータサービスに到達できず、AWS SDK は `Unable to locate credentials` を返します。
 
-### 2. init コンテナはイメージ pull より前に走る
+この hop limit は維持する価値があります。Pod がノードの権限を借用することを防いでいるのがこれ
+です。代わりにサービスアカウントにロールを紐付けるのが、ここで動作させる方法であり、本番でも
+そうすべき方法です。紐付けは [`terraform/main.tf`](../terraform/main.tf) の
+`aws_eks_pod_identity_association` です。
 
-kubelet は init イメージを pull し、init コンテナを実行し、その後で本体イメージを pull
-します。コピーと pull は重なりません。
+### 2. init コンテナは本体イメージの pull を遅らせる
 
-このため、イメージからウェイトを出してイメージが小さくなっても start-to-Ready が伸びる場合が
-あります。variant 3 はコピー工程を無くします。
+kubelet はこの順で処理します。init コンテナのイメージを pull し、init コンテナを完了まで
+実行し、その後で本体イメージを pull します。コピーと pull が重なることはありません。
+
+ここから、通常の考え方に反する帰結が出るので明示します。コンテナイメージからウェイトを出すと
+イメージは小さくなり、小さいイメージは速く pull できます。しかしウェイトを init コンテナで
+取得すると、pull で削れた時間が pull の開始前に消費されるため、start-to-Ready はウェイトを
+イメージに含めていたときより長くなることがあります。variant 3 は init コンテナを無くすことで
+これを回避します。本体イメージの pull が済んだ状態で、vLLM 自身がウェイトを読みます。
 
 ---
 
@@ -338,9 +419,10 @@ bin/bench.sh weights runai-s3
 bin/report.py
 ```
 
-`runai-streamer` とその S3 バックエンドは AWS vLLM Deep Learning Container のベースイメージに
-含まれています。Apache-2.0 ライセンスで、インストールもライセンス取得も不要です。
-`check_runai.sh` は、イメージを持っているノードを使って、設定したタグを確認します。
+このためにインストールするものはありません。`runai-streamer` とその S3 バックエンドは AWS vLLM
+Deep Learning Container のベースイメージに既に含まれており、Apache-2.0 ライセンスなのでライセンス
+取得も不要です。`check_runai.sh` は、設定した具体的なタグにそれが含まれていることを確認します。
+イメージを既に持っているノードに対して実行するため、数 GB の pull ではなく数秒で終わります。
 
 ---
 
@@ -350,8 +432,9 @@ bin/report.py
 bin/verify_config.sh weights
 ```
 
-Pod がどのローダーで起動したか、モデルを `/models` から読んだか `s3://` から読んだか、および
-vLLM のログに出ている起動時間の内訳を報告します。
+次の 3 つを、前提として扱うのではなく実行結果から読み戻します。Pod が実際にどのローダーで
+起動したか、モデルが `/models` から来たのか `s3://` から直接来たのか、そして vLLM 自身が記録した
+起動時間の内訳です。
 
 ---
 
@@ -359,36 +442,57 @@ vLLM のログに出ている起動時間の内訳を報告します。
 
 | Variant | Ready | Ready 後の TTFT | submit から最初のトークンまで |
 |---|---:|---:|---:|
-| `s3-initcontainer` | 96s | 0.65s | 96.6s |
-| `runai-local` | 93s | 0.65s | 93.6s |
-| `runai-s3` | 82s | 0.65s | 82.6s |
+| `s3-initcontainer` | 95s | 0.66s | 95.7s |
+| `runai-local` | 92s | 0.66s | 92.7s |
+| `runai-s3` | 84s | 0.66s | 84.7s |
 
 ### ローダーを変えても合計は変わらなかった
 
 variant 1 と 2 の合計は同じでした。理由は vLLM のログに出ています。
 
 ```
-Loading weights took 0.31 seconds
-torch.compile took 14.8 s in total
-init engine (profile, create kv cache, warmup) took 28.2 s
+Loading weights took 0.30 seconds
+Model loading took 2.98 GiB memory and 0.616735 seconds
+torch.compile took 14.75 s in total
 Graph capturing finished in 4 secs
+init engine (profile, create kv cache, warmup model) took 28.01 s (compilation: 14.75 s)
 ```
 
-ウェイトの読み込みは 96 秒中 0.31 秒でした。より速く読むローダーが影響できるのはこの 0.31 秒
-だけです。このログが無ければ、比較から分かるのは合計が変わらなかったことだけで、ローダーが
-遅いのか、ウェイト読み込みが元から起動時間のごく一部なのかは判別できません。
+ウェイトの読み込みは、95 秒の起動のうち 0.30 秒でした。より速く読むローダーに与えられている
+のはこの 0.30 秒だけで、改善する余地がほとんどありません。
+
+ここで合計よりログ行が重要になる理由がこれです。合計だけを見ると、Run:ai Model Streamer は効果が
+ないという主張に見えます。ログが示しているのは別のことです。このモデルサイズではローダーが制約
+だったことはなく、ウェイトの読み込みに数十秒かかるモデルで同じ変更を行えば、結果は違って見える
+可能性があります。
 
 ### 配送を変えると合計が短縮された
 
-variant 3 は init コンテナを無くし、合計は 96 秒から 82 秒になりました。モデルロード時間は
-0.63 秒から 3.36 秒に増えており、S3 からの読み込みはテンソル単位ではローカルディスクより
-遅くなっています。短縮分は、約 10 秒かかっていたコピー工程が無くなったことによります。
+variant 3 は init コンテナを無くし、合計は 95 秒から 84 秒になりました。
 
-### 最大の要素はコンパイルとウォームアップだった
+短縮はウェイトを速く読んだことによるものではありません。工程を 1 つ無くしたことによるものです。
+実際にはモデルロード時間は 0.62 秒から 2.71 秒に増えています。S3 からの読み込みはテンソル単位で
+はローカルディスクより遅いためです。無くなったのはコピーで、これは約 11 秒かかり、前述のとおり
+本体イメージの pull と並行してではなくその前に実行されていました。
 
-`torch.compile` が 14.7 秒、engine init が 27.9 秒、graph capture が 4 秒で、82 秒のうち
-約 47 秒を占めます。ローダーも配送方法もこれには影響しません。影響するのはコンパイル成果物の
-キャッシュです。
+### 最大の要素は engine init だった
+
+engine init が 84 秒のうち 28.0 秒でした。
+
+この数字は注意して読んでください。上記のログ行は加算するものではなく入れ子です。vLLM はその行
+自体で入れ子を明示しています。
+
+```
+init engine (profile, create kv cache, warmup model) took 27.98 s (compilation: 14.76 s)
+```
+
+`torch.compile` の 14.76 秒と graph capture の 4 秒は、この 28.0 秒の**内側**で起きています。
+足し合わせる 3 つの段階ではなく、足すとコンパイル時間を二重に数えることになります。
+
+このステップで変えたものは、いずれもこの段階に影響しません。どちらのローダーも影響せず、どちらの
+配送方法も影響しません。コンパイル成果物の再利用はその一部に影響し、上限はコンパイルの 14.76 秒
+です。残りを占める profiling、KV cache 作成、warmup は残ります。したがってこのステップの終わりで
+未解決の最大項目はコンパイルであり、それを[ステップ 7](07-compile-cache.md) で計測します。
 
 ### モデルが大きい場合
 
@@ -396,6 +500,28 @@ variant 3 は init コンテナを無くし、合計は 96 秒から 82 秒に�
 モデルを使っており、そちらではローダーが起動時間に占める割合が大きくなります。その場合を
 計測するには `config.env` の `MODEL_HF_REPO` を大きいモデルに設定してください。運用する
 モデルが大きい場合、結果は上記と異なる可能性があります。
+
+### ウェイトがノードに届く経路
+
+この経路のうち 1 箇所は、このステップの設定ではなく Terraform が用意しています。ダウンロードの
+数字を読む前に、それが存在することを把握しておく価値があります。
+
+VPC にはプライベートサブネットと NAT ゲートウェイ 1 つがあり、加えて S3 Gateway VPC エンド
+ポイントがあります。エンドポイントは、リージョンの S3 プレフィックスリスト向けのルートを
+プライベートルートテーブルに追加します。このルートはデフォルトルートより具体的なため優先され、
+S3 の通信は NAT を通りません。これはここでのウェイトにも、前のステップのコンテナイメージの
+レイヤにも当てはまります。ECR がレイヤを S3 に保存しているためです。
+
+これが行わないことが 2 つあります。ダウンロードが速くなることは保証しません。ここで 1 台の
+ノードが取得する速度では NAT は能力の限界に近づいておらず、エンドポイントが効いてくるのは多数の
+ノードが 1 つの NAT ゲートウェイを通じて同時にスケールアウトする場合です。また非暗号の接続を
+暗号化するものでもありません。どちらの経路でも HTTPS を使えます。取り除かれるのは NAT のデータ
+処理料金と、NAT への依存です。
+
+イメージ pull を完全に NAT から外すことが目的の場合、ゲートウェイエンドポイントだけでは足りま
+せん。レイヤのダウンロードはカバーしますが、レジストリの API 呼び出しは S3 宛てではありません。
+こちらには `ecr.api` と `ecr.dkr` のインターフェイスエンドポイントが必要で、無料のゲートウェイ
+エンドポイントと違い、時間課金とデータ課金が発生します。
 
 ---
 

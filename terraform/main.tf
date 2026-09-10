@@ -84,6 +84,39 @@ module "vpc" {
 }
 
 ################################################################################
+# S3 Gateway VPC endpoint.
+#
+# Both things this workshop measures downloading end up talking to S3: the model weights
+# directly, and the container image layers, because ECR stores layers in S3. Without this
+# endpoint both take the default route through the single NAT gateway above.
+#
+# A gateway endpoint adds a route for the regional S3 prefix list to the route tables named
+# below. That route is more specific than 0.0.0.0/0, so it wins, and the traffic stops being
+# processed by NAT. Nothing in the application changes: the S3 URI and the vLLM arguments
+# are the same either way.
+#
+# What this buys is NAT data-processing charges and the dependency on NAT. It does not
+# promise a faster download. At the rate a single node pulls here -- 97 MB/s on baseline,
+# 260 MB/s on soci -- NAT is nowhere near its limit. It matters when many nodes scale out at
+# once through one NAT gateway.
+#
+# Gateway endpoints have no hourly and no per-GB charge. That is specific to the gateway
+# type; interface endpoints are billed both ways. Removing NAT from the image pull entirely
+# would need ecr.api and ecr.dkr interface endpoints as well, because the registry API calls
+# do not go to S3 even though the layers do.
+################################################################################
+resource "aws_vpc_endpoint" "s3" {
+  vpc_id            = module.vpc.vpc_id
+  service_name      = "com.amazonaws.${var.region}.s3"
+  vpc_endpoint_type = "Gateway"
+
+  # Private route tables only. The public subnets reach S3 through the internet gateway.
+  route_table_ids = module.vpc.private_route_table_ids
+
+  tags = merge(var.tags, { Name = "${var.name_prefix}-s3" })
+}
+
+################################################################################
 # Cluster 1 -- self-managed Karpenter (baseline, snapshot, soci)
 ################################################################################
 

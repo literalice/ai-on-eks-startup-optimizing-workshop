@@ -253,6 +253,29 @@ run "${HERE}/verify_config.sh" weights
 say "These runs also measure time to first token. A pod reaching Ready means vLLM answers its health endpoint, which does not indicate how soon it produces a token. Submit to first token covers that."
 
 ################################################################################
+title "Step 7 -- reusing the compiled artifacts"
+
+say "The vLLM log from those runs shows where the remaining time went. Reading the weights was under a second. Engine initialisation was around twenty-eight, and vLLM reports how much of that is compilation. That is the largest item left, and no loader affects it."
+
+say "vLLM can reuse compiled artifacts. It writes them under its cache directory, which is in the container's writable layer, so a replacement pod starts with nothing and compiles again. The change is a volume that outlives the pod."
+
+run "${HERE}/show_config.sh" compile
+
+say "One detail matters for whether this measures anything. Run:ai Model Streamer caches the model under the same cache root. Mounting the whole root would persist the weights as well, so the second run would skip the S3 read and the saving could not be attributed to compilation. Only the compile subdirectory is mounted, so the weights come from S3 in both runs."
+
+say "Two runs. The first gets a cache directory nothing has used, so it compiles. The second is the same node and the same directory with the pod replaced. Same image, same GPU, same model, same loader, same arguments."
+
+run "${HERE}/bench.sh" compile cold
+
+note "Note the verdict line: the cache state is read from vLLM's log, not inferred from the timing being short."
+
+run "${HERE}/bench.sh" compile warm
+
+say "Compilation went from about fifteen seconds to about three, and the engine stage roughly halved. Check the model load figure in both: it stayed the same, which is how we know the weights still came from S3 and the saving belongs to compilation."
+
+say "What this does not do. It does not remove profiling, KV cache creation or warmup, which are the rest of that stage, and the artifacts do not survive the node. Restoring them from S3 onto a new node is a third test, written up in the steps but not scripted here."
+
+################################################################################
 title "The readout"
 
 say "All variants together. Provisioning, image, and workload, plus effective throughput and time to first token where we measured it."

@@ -31,6 +31,8 @@ VARIANT_ORDER = [
     "weights-s3-initcontainer",
     "weights-runai-local",
     "weights-runai-s3",
+    "compile-cold",
+    "compile-warm",
 ]
 
 VARIANT_DESCRIPTIONS = {
@@ -45,6 +47,8 @@ VARIANT_DESCRIPTIONS = {
     "weights-s3-initcontainer": "weights copied S3 to disk, vLLM default safetensors loader",
     "weights-runai-local": "weights copied S3 to disk, Run:ai Model Streamer from disk",
     "weights-runai-s3": "no copy: Run:ai Model Streamer reads S3 directly",
+    "compile-cold": "compile cache empty, so compilation runs",
+    "compile-warm": "same node and cache directory, pod replaced",
 }
 
 # Karpenter's unavailable-offerings cache has a 3-minute TTL, so a pod waiting on a
@@ -55,6 +59,7 @@ DECISION_ANOMALY_S = 90.0
 
 COLD_VARIANTS = ["baseline", "snapshot", "soci", "automode"]
 WEIGHTS_VARIANTS = ["weights-s3-initcontainer", "weights-runai-local", "weights-runai-s3"]
+COMPILE_VARIANTS = ["compile-cold", "compile-warm"]
 
 # Stages collapsed into the three things a reader actually decides about.
 PROVISION_SEGMENTS = {
@@ -329,6 +334,66 @@ def markdown(runs, order, extras):
             "`runai-local` to `runai-s3` changes **only the delivery**, removing the "
             "copy step altogether. Reporting them separately keeps the two effects from "
             "being credited to each other."
+        )
+        out.append("")
+
+    # ----------------------------------- compile cache: reuse across pods
+    compile_present = [a for a in COMPILE_VARIANTS if a in runs]
+    if compile_present:
+        out.append("## Phase 3 -- reusing vLLM's compiled artifacts")
+        out.append("")
+        out.append(
+            "Same node, same image, same GPU, same model, same loader and the same vLLM "
+            "arguments. The two runs differ only in whether the mounted compile cache "
+            "directory already had contents."
+        )
+        out.append("")
+        out.append(
+            "| Variant | Cache | `torch.compile` | Engine init | Start to Ready | Submit to first token |"
+        )
+        out.append("|---|---|---:|---:|---:|---:|")
+        for variant in compile_present:
+            record = runs[variant]
+            vllm = record.get("vllm") or {}
+            total = record.get("total_seconds")
+            end_to_end = record.get("submit_to_first_token_seconds")
+            compile_s = vllm.get("torch_compile_seconds")
+            engine_s = vllm.get("engine_init_seconds")
+            out.append(
+                f"| `{variant.replace('compile-', '')}` | {vllm.get('compile_cache') or '—'} | "
+                f"{f'{compile_s:.2f}s' if compile_s else '—'} | "
+                f"{f'{engine_s:.2f}s' if engine_s else '—'} | "
+                f"{f'{total:.0f}s' if total else '—'} | "
+                f"{f'**{end_to_end:.0f}s**' if end_to_end else '—'} |"
+            )
+        out.append("")
+
+        cold = runs.get("compile-cold", {})
+        warm = runs.get("compile-warm", {})
+        cold_total = cold.get("total_seconds")
+        warm_total = warm.get("total_seconds")
+        cold_load = (cold.get("vllm") or {}).get("model_load_seconds")
+        warm_load = (warm.get("vllm") or {}).get("model_load_seconds")
+        if cold_total and warm_total:
+            delta = cold_total - warm_total
+            out.append(
+                f"> Reusing the artifacts saved **{delta:.0f}s** of start to Ready "
+                f"({(delta / cold_total) * 100:.0f}% of the cold run)."
+            )
+            out.append("")
+        if cold_load and warm_load:
+            out.append(
+                f"> The weights came from S3 in both runs: model load was {cold_load:.2f}s "
+                f"cold and {warm_load:.2f}s warm. Only `torch_compile_cache` is mounted, not "
+                f"the whole of `/root/.cache/vllm`, so the model was not persisted with the "
+                f"artifacts and the saving is attributable to compilation."
+            )
+            out.append("")
+        out.append(
+            "The cache state in the table is read from vLLM's log rather than inferred from "
+            "a short compile time. A cache hit removes compilation; it does not remove the "
+            "profiling, KV-cache creation and warmup in the same stage, and the artifacts do "
+            "not survive the node."
         )
         out.append("")
 
