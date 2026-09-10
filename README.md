@@ -68,6 +68,10 @@ If you are working through the workshop, start here. Each step gives the configu
 which field, in which resource, the reason for it, what happens if it is missing, and
 how to check that it took effect without relying on the timing figures.
 
+To apply these to a cluster you already have, rather than building the environment here,
+[EXISTING-CLUSTER.md](EXISTING-CLUSTER.md) gives the same settings as commands and YAML with no
+scripts involved, and covers keeping your existing workloads off the new node pools.
+
 | Step | Configuration change |
 |---|---|
 | [0 — The environment](steps/00-environment.md) | What Terraform builds, and the decisions that make the later comparisons valid |
@@ -683,6 +687,10 @@ Kubernetes のタイムスタンプは秒単位なので、1 秒未満の差に�
 ワークショップを実際に進める場合は、ここから始めてください。各ステップに設定内容
 （どのフィールドを、どのリソースに、なぜ入れるのか、無い場合に何が起きるのか、時間の
 数字に頼らずに効いたことをどう確認するか）を記載しています。
+
+ここで環境を構築するのではなく、既存クラスターに適用する場合は
+[EXISTING-CLUSTER.md](EXISTING-CLUSTER.md) を参照してください。同じ設定をスクリプトなしの
+コマンドと YAML で示し、既存ワークロードを新しい node pool に載せない方法も扱っています。
 
 | ステップ | 設定変更 |
 |---|---|
