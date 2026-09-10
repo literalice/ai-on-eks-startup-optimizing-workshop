@@ -119,6 +119,16 @@ instance type, region and registry conditions, so your figures will differ.
   ```
 - For phase 2: the `hf` CLI (`pip install --upgrade 'huggingface_hub[cli]'`)
 
+Check an account against all of this without creating anything:
+
+```bash
+bin/preflight.sh
+```
+
+[PREREQUISITES.md](PREREQUISITES.md) covers the same ground in a form that can be sent to
+someone before a session: what gets created, what permissions are needed, what the script
+cannot verify, and the cost.
+
 ### Cost and time
 
 About USD 6–12 and about 2 hours in total. Most of that time is preparation that runs
@@ -707,6 +717,15 @@ bin/verify_config.sh soci   # 実行後に、効いたことを確認
     --quota-code L-DB2E81BA --region us-west-2
   ```
 - フェーズ 2 用: `hf` CLI（`pip install --upgrade 'huggingface_hub[cli]'`）
+
+何も作成せずに、アカウントが上記を満たしているか確認できます。
+
+```bash
+bin/preflight.sh
+```
+
+[PREREQUISITES.md](PREREQUISITES.md) は同じ内容を、セッション前に送付できる形にまとめて
+います。作成されるもの、必要な権限、スクリプトで確認できない範囲、費用を記載しています。
 
 ### 費用と時間
 
