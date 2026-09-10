@@ -41,8 +41,8 @@ Self-managed Karpenter and EKS Auto Mode both own the `karpenter.sh` CRDs — `N
 other means two controllers reconciling the same objects. Two clusters avoids that.
 
 The cost of the split is that `automode` runs on a different control plane from the other
-three, so its figure is not a like-for-like comparison. `bin/report.py` states that alongside
-the table rather than leaving the reader to notice it.
+three, so its figure is not a like-for-like comparison. `bin/report.py` prints that caveat
+alongside the table.
 
 What is not split is the VPC. Both clusters use the same subnets, so the route to the registry
 is identical and the image figures remain comparable. `bin/verify_env.sh` checks this, because
@@ -93,11 +93,10 @@ Each cluster has a small managed node group of two `m6i.large` instances, labell
 `karpenter.sh/controller=true`, and the Karpenter controller is pinned to that label by
 `nodeSelector`.
 
-This is worth understanding rather than copying, because of what happens when it is wrong. If
-that node group has no nodes, the controller has nowhere to run and goes `Pending`. Nothing
-then creates NodeClaims, so every variant's pod also sits `Pending` — and no message anywhere
-says the controller is missing. `bin/bench.sh` waits 25 minutes and reports that the pod never
-became Ready.
+What happens when this is wrong is worth knowing, because it is silent. If that node group has
+no nodes, the controller has nowhere to run and goes `Pending`. Nothing then creates NodeClaims,
+so every variant's pod also sits `Pending`, and no message anywhere says the controller is
+missing. `bin/bench.sh` waits 25 minutes and reports that the pod never became Ready.
 
 ```bash
 # what that failure looks like
@@ -154,8 +153,8 @@ change an unencrypted connection into an encrypted one, since both paths can use
 
 ## What is not built here
 
-The EBS snapshot for step 2 and the model in S3 for step 6 are prepared separately, because
-each takes minutes and neither belongs in a live session:
+The EBS snapshot for step 2 and the model in S3 for step 6 are prepared separately. Each takes
+several minutes and neither needs supervision:
 
 ```bash
 IMAGE="$(grep WORKLOAD_IMAGE config.env | cut -d'"' -f2)" snapshot/build-snapshot.sh
@@ -239,8 +238,7 @@ bin/verify_env.sh
 避けられます。
 
 分割の代償は、`automode` が他の 3 つと異なるコントロールプレーンで動くことです。その数字は
-like-for-like な比較ではありません。`bin/report.py` は読者が気づくのを待たず、表と並べてこれを
-記載します。
+like-for-like な比較ではありません。`bin/report.py` はこの注意書きを表と並べて出力します。
 
 分割しないのは VPC です。両クラスターが同じサブネットを使うため、レジストリへの経路は同一で、
 イメージの数字は比較可能なままです。`bin/verify_env.sh` がこれを確認します。一方のクラスターを
@@ -287,7 +285,7 @@ GPU がノード上に存在するだけでなくコンテナから使えるこ�
 `karpenter.sh/controller=true` のラベルが付いています。Karpenter コントローラは `nodeSelector`
 でこのラベルに固定されています。
 
-これは真似するだけでなく理解する価値があります。誤ったときに何が起きるかが理由です。この
+これが誤ったときに何が起きるかは、知っておく価値があります。無言で失敗するためです。この
 ノードグループにノードが無いと、コントローラは動く場所が無く `Pending` になります。すると
 NodeClaim を作るものが無くなり、各 variant の Pod も `Pending` のままになります。そして
 **コントローラが不在であることを、どこも報告しません。** `bin/bench.sh` は 25 分待ち、Pod が
@@ -348,7 +346,7 @@ hop limit を 1 に設定するため、コンテナ内からのリクエスト�
 ## ここで作らないもの
 
 ステップ 2 用の EBS スナップショットと、ステップ 6 用の S3 上のモデルは別に準備します。どちらも
-数分かかり、ライブセッション中に行うものではないためです。
+数分かかり、監視は不要です。
 
 ```bash
 IMAGE="$(grep WORKLOAD_IMAGE config.env | cut -d'"' -f2)" snapshot/build-snapshot.sh

@@ -110,8 +110,7 @@ State that the two cannot be combined before showing either set of figures.
 > the volume Bottlerocket uses for container images, so setting up one means the other is
 > not used.
 
-Show the `snapshot` configuration before running it. It is one field, which is worth
-displaying rather than describing:
+Show the `snapshot` configuration before running it. It is one field, so put it on screen:
 
 ```bash
 bin/show_config.sh snapshot
@@ -401,7 +400,7 @@ bin/show_config.sh automode    # soci との差分
 > 方法は 2 つあり、同じノードには併用できません。どちらも Bottlerocket がコンテナイメージに
 > 使うボリュームを対象にしているため、一方を設定するともう一方は使われません。
 
-`snapshot` は実行前に設定を表示してください。1 フィールドなので、口頭で説明するより表示する方が
+`snapshot` は実行前に設定を表示してください。1 フィールドなので、画面に出してください。
 早いです。
 
 ```bash

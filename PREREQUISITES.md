@@ -17,7 +17,7 @@ export GPU_INSTANCE_TYPE="gr6.8xlarge"
 ```
 
 Every variant runs on this one type, so that nothing in the comparison is explained by
-hardware. Two properties of the type are requirements rather than preferences.
+hardware. The type has to have two properties.
 
 **Local NVMe instance store.** Steps 3 and 4 place container storage on it. A type without
 instance store makes both of those steps measure the same thing as step 1.
@@ -154,8 +154,9 @@ are removed separately.
 | VPCs per Region | `L-F678F1CE` | 1 | 5 |
 | EC2-VPC Elastic IPs | `L-0263D0A3` | 1 | 5 |
 
-Existing VPCs and Elastic IPs count against these, so an account already near either default
-needs an increase for a single-vCPU-reason unrelated to GPUs.
+Existing VPCs and Elastic IPs count against these. An account already near either default needs
+an increase for a reason that has nothing to do with GPUs, which is easy to overlook when the
+GPU quota is the one being planned for.
 
 ---
 
@@ -304,7 +305,7 @@ export GPU_INSTANCE_TYPE="gr6.8xlarge"
 ```
 
 すべての variant がこの 1 つのタイプで動きます。比較の中にハードウェアで説明できる差を作らない
-ためです。このタイプの 2 つの性質は、好みではなく要件です。
+ためです。このタイプには 2 つの性質が必要です。
 
 **ローカル NVMe インスタンスストア。** ステップ 3 と 4 はそこにコンテナストレージを配置します。
 インスタンスストアを持たないタイプでは、この 2 つのステップがステップ 1 と同じものを計測します。
@@ -437,8 +438,8 @@ Terraform が作成するロールにもそれを適用する必要があり、�
 | VPCs per Region | `L-F678F1CE` | 1 | 5 |
 | EC2-VPC Elastic IPs | `L-0263D0A3` | 1 | 5 |
 
-既存の VPC と Elastic IP もこれらに計上されるため、どちらかの既定値に近いアカウントでは、GPU とは
-無関係の理由で引き上げが必要になります。
+既存の VPC と Elastic IP もこれらに計上されます。どちらかの既定値に近いアカウントでは、GPU とは
+無関係の理由で引き上げが必要になります。GPU クォータだけを想定していると見落としやすい点です。
 
 ---
 

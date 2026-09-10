@@ -243,9 +243,9 @@ Build it with a dedicated builder instance:
 IMAGE="$(grep WORKLOAD_IMAGE config.env | cut -d'"' -f2)" ./snapshot/build-snapshot.sh
 ```
 
-This takes 10-20 minutes for a multi-GB image, so run it the day before rather than live.
-The snapshot ID is written to `results/snapshot-id.txt` and to an SSM parameter, and
-`bin/prep.sh` reads it from there.
+This takes 10-20 minutes for a multi-GB image and needs no supervision. The snapshot ID is
+written to `results/snapshot-id.txt` and to an SSM parameter, and `bin/prep.sh` reads it from
+there.
 
 > The builder stops `kubelet`, removes every image already present, pulls only the images you
 > named, then **stops the instance** before snapshotting. That is what makes the snapshot
@@ -854,7 +854,7 @@ Ready になればコンテナから GPU が使える状態だと分かります
 IMAGE="$(grep WORKLOAD_IMAGE config.env | cut -d'"' -f2)" ./snapshot/build-snapshot.sh
 ```
 
-数 GB のイメージで 10〜20 分かかるため、当日ではなく前日に実行してください。スナップショット
+数 GB のイメージで 10〜20 分かかり、監視は不要です。スナップショット
 ID は `results/snapshot-id.txt` と SSM パラメータに書かれ、`bin/prep.sh` がそこから
 読み取ります。
 
