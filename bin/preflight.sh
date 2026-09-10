@@ -125,13 +125,8 @@ check_quota() {
   fi
 }
 
-# The quota depends on the instance family, not just on the vCPU count, and both G and P are
-# counted in vCPU rather than in instances.
-#
-# P types are refused. Nothing in this workshop needs one -- the model is 1.5B parameters and
-# fits in 24 GB -- and they cost several times a G type, so a session that reached for one
-# would leave the stated cost behind without gaining a measurement. Set
-# ALLOW_LARGE_GPU_FAMILY=1 to override, if you have a reason.
+# These quotas are counted in vCPU rather than in instances, so the requirement follows the
+# configured type. P types are refused on cost; ALLOW_LARGE_GPU_FAMILY=1 overrides that.
 case "${GPU_INSTANCE_TYPE}" in
   g*)
     check_quota ec2 L-DB2E81BA "${GPU_VCPUS}" "Running On-Demand G and VT instances (vCPU)"
@@ -141,11 +136,7 @@ case "${GPU_INSTANCE_TYPE}" in
       warn "${GPU_INSTANCE_TYPE} is a P type, allowed by ALLOW_LARGE_GPU_FAMILY=1"
       check_quota ec2 L-417A185B "${GPU_VCPUS}" "Running On-Demand P instances (vCPU)"
     else
-      fail "${GPU_INSTANCE_TYPE} is a P type. This workshop is built around G types."
-      note "The model is 1.5B parameters and fits in 24 GB, so a P type buys no measurement"
-      note "and costs several times more per hour. It also counts against a different quota"
-      note "(L-417A185B rather than L-DB2E81BA), so a P type in an account provisioned for"
-      note "G types will not launch at all."
+      fail "${GPU_INSTANCE_TYPE} is a P type, which this workshop rejects on cost."
       note "Pick a G type from the table in PREREQUISITES.md, or set ALLOW_LARGE_GPU_FAMILY=1."
     fi
     ;;

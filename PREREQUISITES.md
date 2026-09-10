@@ -49,26 +49,7 @@ Single-GPU types with instance store:
 The GPU memory column matters only if `MODEL_HF_REPO` is raised to a larger model. The default
 model is 2.9 GB and fits on any of these.
 
-### P types are refused
-
-`bin/prep.sh` and `bin/preflight.sh` both reject a `p` type. This is a cost constraint, not a
-technical one.
-
-The model is 1.5B parameters and fits in 24 GB, so a P type produces the same measurement at
-several times the hourly rate. On-Demand in `us-west-2`:
-
-| Type | USD/hour |
-|---|---:|
-| `g6.4xlarge` | 1.32 |
-| `gr6.8xlarge` | 2.45 |
-| `p5.4xlarge` | 6.88 |
-| `p4d.24xlarge` | 21.96 |
-
-P types also count against a different quota, `L-417A185B` instead of `L-DB2E81BA`. An account
-whose G quota was raised for this workshop will not launch one, and that appears as a variant
-stuck `Pending` rather than as a quota error.
-
-`ALLOW_LARGE_GPU_FAMILY=1` overrides both checks. The cost figures below assume a G type.
+`bin/prep.sh` and `bin/preflight.sh` reject a `p` type on cost.
 
 ---
 
@@ -337,26 +318,7 @@ vCPU 数も結果を変えます。SOCI の並列展開は CPU バウンドな�
 GPU メモリの列が問題になるのは、`MODEL_HF_REPO` をより大きいモデルに変更する場合だけです。既定の
 モデルは 2.9 GB で、上記のいずれにも収まります。
 
-### P 系は拒否されます
-
-`bin/prep.sh` と `bin/preflight.sh` はどちらも `p` 系を拒否します。これは技術的な制約ではなく
-費用の制約です。
-
-モデルは 1.5B パラメータで 24 GB に収まるため、P 系でも計測結果は同じで、時間単価が数倍になります。
-On-Demand、`us-west-2` の価格です。
-
-| タイプ | USD/時 |
-|---|---:|
-| `g6.4xlarge` | 1.32 |
-| `gr6.8xlarge` | 2.45 |
-| `p5.4xlarge` | 6.88 |
-| `p4d.24xlarge` | 21.96 |
-
-P 系は `L-DB2E81BA` ではなく `L-417A185B` という別のクォータに計上されます。本ワークショップの
-ために G のクォータを引き上げたアカウントでは起動せず、クォータのエラーではなく **variant が
-`Pending` のまま**という形で現れます。
-
-`ALLOW_LARGE_GPU_FAMILY=1` で両方のチェックを上書きできます。以下の費用は G 系を前提としています。
+`bin/prep.sh` と `bin/preflight.sh` は費用の観点から `p` 系を拒否します。
 
 ---
 
