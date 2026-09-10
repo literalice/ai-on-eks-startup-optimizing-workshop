@@ -119,6 +119,84 @@ for this image.
 
 ---
 
+## If several people want to run it
+
+One AWS account can hold several of these environments, but they cannot share one. Give each
+person their own `NAME_PREFIX`, their own clone and their own Terraform state.
+
+The prefix has to be set in two places, and they have to agree. `config.env` is what the
+scripts read, and `name_prefix` is what Terraform reads:
+
+```bash
+# config.env
+export NAME_PREFIX="br-startup-alice"
+```
+
+```bash
+terraform -chdir=terraform apply -var 'name_prefix=br-startup-alice'
+```
+
+Almost everything is named from that prefix: both clusters, the VPC, the model bucket, the IAM
+policy, the Karpenter subnet discovery tag and the snapshot. If the two disagree, `bin/prep.sh`
+will look for clusters that Terraform did not create.
+
+### Why one environment cannot be shared
+
+The measurements are of a cold first pod, so the scripts delete what a previous run left
+behind. `bin/reset.sh` removes the pods labelled for the variant it is about to run **and the
+NodeClaim**, which terminates the instance:
+
+```bash
+kubectl -n bench delete pod -l "workshop-variant=${variant}"
+kubectl delete nodeclaim -l "karpenter.sh/nodepool=${variant}"
+```
+
+Two people on one cluster would delete each other's nodes mid-run. A separate namespace does
+not help, because each variant is pinned to one node pool and the node pool is what gets
+reset.
+
+### What to budget for each additional person
+
+| Per person | Note |
+|---|---|
+| 1 VPC | The default quota is 5 per region, and existing VPCs count |
+| 1 Elastic IP | For the NAT gateway. The default quota is also 5 |
+| 32 vCPU of G and VT | Concurrent runs each need a node at the same time |
+| About USD 6 to 12 | Costs do not share |
+
+The GPU quota is the one to check against the number of people. Four people running
+concurrently need 128 vCPU, not 32.
+
+### The constraint that is not a quota
+
+Concurrent runs draw on the same GPU capacity in the same Availability Zones. Capacity is per
+instance type per zone, and a zone can be short of one type while another type is fine. When
+Karpenter is refused, it holds that offering unavailable for three minutes, and the pod waits
+out the TTL before a node is even requested. That wait lands in the measurement with no error
+to explain it.
+
+Two ways to reduce that. Have everyone run `bin/check_capacity.sh` before starting and agree
+on an instance type that has capacity in every zone. Or stagger the runs rather than starting
+together, which also avoids everyone hitting the registry at once.
+
+### What can be shared
+
+The snapshot and the model bucket are read-only once built, so one person can build them and
+the others can point at them, which saves each of the others the 14-minute snapshot build:
+
+```bash
+# in config.env
+export MODEL_BUCKET="<the bucket the first person created>"
+# and in results/snapshot-id.txt, or via the SSM parameter /<their prefix>/image-cache-snapshot-id
+```
+
+Within one account this needs no cross-account policy. The reading role needs `s3:GetObject`
+on that bucket, which is what `${NAME_PREFIX}-model-weights-read` grants for the bucket the
+same prefix created, so sharing means either granting the other prefixes' roles access or
+staging the model per person.
+
+---
+
 ## On the day
 
 GPU capacity varies by instance type and Availability Zone, and it changes within minutes. A
@@ -132,6 +210,15 @@ bin/check_capacity.sh
 This launches one instance per subnet and terminates it immediately, because no API reports
 available capacity. If it fails, the error from EC2 names the Availability Zones that can serve
 the request at that moment.
+
+After the last run, check that no GPU node is still up. Phase 3 ends with a pod running, and
+Karpenter keeps the node for 30 minutes after the last pod leaves, which is deliberate — the
+warm runs need it — but it means a finished session can leave a GPU instance behind.
+
+```bash
+kubectl -n bench delete pods --all
+kubectl get nodeclaims        # expect no output
+```
 
 <br>
 
@@ -260,6 +347,83 @@ EKS クラスター 2 面と NAT ゲートウェイは、GPU ノードが動い�
 
 ---
 
+## 複数人で実行する場合
+
+1 つの AWS アカウントにこの環境を複数持つことはできますが、1 つの環境を共有することはできません。
+各自に別の `NAME_PREFIX`、別の clone、別の Terraform state を用意してください。
+
+prefix は 2 箇所に設定する必要があり、両者を一致させてください。スクリプトが読むのは
+`config.env`、Terraform が読むのは `name_prefix` です。
+
+```bash
+# config.env
+export NAME_PREFIX="br-startup-alice"
+```
+
+```bash
+terraform -chdir=terraform apply -var 'name_prefix=br-startup-alice'
+```
+
+ほぼすべてがこの prefix から命名されます。2 面のクラスター、VPC、モデルバケット、IAM ポリシー、
+Karpenter のサブネット discovery タグ、スナップショットです。両者が食い違うと、`bin/prep.sh` は
+Terraform が作成していないクラスターを探すことになります。
+
+### 1 つの環境を共有できない理由
+
+計測対象が cold な 1 個目の Pod なので、スクリプトは前回の実行が残したものを削除します。
+`bin/reset.sh` は、これから実行する variant のラベルが付いた Pod と、**NodeClaim** を削除します。
+NodeClaim の削除はインスタンスの終了を意味します。
+
+```bash
+kubectl -n bench delete pod -l "workshop-variant=${variant}"
+kubectl delete nodeclaim -l "karpenter.sh/nodepool=${variant}"
+```
+
+1 クラスターを 2 人で使うと、実行途中の相手のノードを削除します。名前空間を分けても解決しません。
+各 variant はノードプールに pin されており、reset の対象がそのノードプールだからです。
+
+### 1 人増えるごとに必要なもの
+
+| 1 人あたり | 備考 |
+|---|---|
+| VPC 1 つ | 既定クォータはリージョンあたり 5。既存の VPC も数に含まれます |
+| Elastic IP 1 つ | NAT ゲートウェイ用。既定クォータも 5 |
+| G / VT の 32 vCPU | 同時実行する場合、各自が同時にノードを必要とします |
+| 6〜12 USD 程度 | 費用は共有されません |
+
+人数に対して確認すべきは GPU クォータです。4 人が同時実行するなら 32 ではなく 128 vCPU が
+必要です。
+
+### クォータではない制約
+
+同時実行は同じ AZ の同じ GPU 容量を消費します。容量はインスタンスタイプと AZ の組み合わせごとで、
+ある AZ が 1 つのタイプだけ不足していることもあります。Karpenter が拒否されると、その offering を
+3 分間 unavailable に保持し、Pod はノードが要求される前に TTL を待ちます。この待ち時間は、説明する
+エラーを伴わずに計測に入ります。
+
+軽減する方法は 2 つあります。全員が開始前に `bin/check_capacity.sh` を実行し、全 AZ で容量のある
+インスタンスタイプを合意することです。あるいは同時に始めず実行時間をずらすことです。後者は
+レジストリへの同時アクセスも避けられます。
+
+### 共有できるもの
+
+スナップショットとモデルバケットは作成後は読み取り専用なので、1 人が作成して他の人がそれを指す
+ことができます。他の各人が 14 分のスナップショット作成を省けます。
+
+```bash
+# config.env に指定
+export MODEL_BUCKET="<最初の人が作成したバケット>"
+# スナップショット ID は results/snapshot-id.txt、または
+# SSM パラメータ /<その人の prefix>/image-cache-snapshot-id から
+```
+
+同一アカウント内であればクロスアカウントのポリシーは不要です。読み取り側のロールには対象バケットへの
+`s3:GetObject` が必要です。これは `${NAME_PREFIX}-model-weights-read` が同じ prefix で作成した
+バケットに対して付与しているものなので、共有する場合は他の prefix のロールにアクセスを許可するか、
+各自でモデルを配置することになります。
+
+---
+
 ## 当日
 
 GPU の容量はインスタンスタイプと AZ の組み合わせごとに変動し、数分単位で変わります。選択した
@@ -272,3 +436,12 @@ bin/check_capacity.sh
 
 利用可能な容量を報告する API が存在しないため、各サブネットに 1 台起動して即座に終了させます。
 失敗した場合、EC2 のエラーにはその時点で要求を満たせる AZ が示されます。
+
+最後の実行の後、GPU ノードが残っていないか確認してください。フェーズ 3 は Pod が動いている状態で
+終わり、Karpenter は最後の Pod が消えてから 30 分ノードを保持します。これは warm 実行に必要なため
+意図的な設定ですが、セッション終了後に GPU インスタンスが残る原因になります。
+
+```bash
+kubectl -n bench delete pods --all
+kubectl get nodeclaims        # 何も出力されないこと
+```

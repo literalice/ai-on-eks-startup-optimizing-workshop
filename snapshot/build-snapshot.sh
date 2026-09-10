@@ -16,18 +16,32 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "${HERE}/.." && pwd)"
 
+# Read the same file everything else reads, so the snapshot is built from the image the
+# variants will run and is named after the same prefix.
+if [[ -f "${ROOT}/config.env" ]]; then
+  # shellcheck source=../config.env
+  source "${ROOT}/config.env"
+fi
+
 REGION="${REGION:-us-west-2}"
+NAME_PREFIX="${NAME_PREFIX:-br-startup}"
 K8S_VERSION="${K8S_VERSION:-1.34}"
-IMAGE="${IMAGE:-}"
+IMAGE="${IMAGE:-${WORKLOAD_IMAGE:-}}"
 SNAPSHOT_SIZE="${SNAPSHOT_SIZE:-80}"
+
 # Must have a GPU, because AMI_SSM_PATH below is the NVIDIA variant. See the check further
-# down for what happens otherwise.
-BUILDER_INSTANCE_TYPE="${BUILDER_INSTANCE_TYPE:-g6.4xlarge}"
-SSM_PARAM="${SSM_PARAM:-/bottlerocket-workshop/image-cache-snapshot-id}"
+# down for what happens otherwise. Defaulting to the type the variants run on means the type
+# has already been checked for capacity by bin/check_capacity.sh.
+BUILDER_INSTANCE_TYPE="${BUILDER_INSTANCE_TYPE:-${GPU_INSTANCE_TYPE:-gr6.8xlarge}}"
+
+# Keyed on NAME_PREFIX, so two people working in one account do not overwrite each other's
+# snapshot ID. Everything else this workshop creates is named from the same prefix.
+SSM_PARAM="${SSM_PARAM:-/${NAME_PREFIX}/image-cache-snapshot-id}"
+
 WORKDIR="${WORKDIR:-/tmp/bottlerocket-images-cache}"
 
 if [[ -z "${IMAGE}" ]]; then
-  echo "IMAGE is required. Example:" >&2
+  echo "IMAGE is required, and WORKLOAD_IMAGE is not set in config.env either. Example:" >&2
   echo "  IMAGE=763104351884.dkr.ecr.us-west-2.amazonaws.com/vllm:0.22.0-gpu-py312-cu130-ubuntu22.04-ec2 $0" >&2
   exit 2
 fi
@@ -87,6 +101,16 @@ SNAPSHOT_ID="$(aws ssm get-parameter \
   --name "${SSM_PARAM}" \
   --query 'Parameter.Value' \
   --output text)"
+
+# The wrapped script names every snapshot "Bottlerocket Data Volume", which is ambiguous when
+# more than one person is working in the same account, and at teardown there is nothing to
+# distinguish one from another. Retag it with the prefix everything else uses.
+aws ec2 create-tags \
+  --region "${REGION}" \
+  --resources "${SNAPSHOT_ID}" \
+  --tags "Key=Name,Value=${NAME_PREFIX}-image-cache" \
+         "Key=Purpose,Value=bottlerocket-startup-workshop" \
+         "Key=Image,Value=${IMAGE}" >/dev/null
 
 mkdir -p "${ROOT}/results"
 printf '%s\n' "${SNAPSHOT_ID}" > "${ROOT}/results/snapshot-id.txt"
