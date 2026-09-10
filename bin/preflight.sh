@@ -125,7 +125,24 @@ check_quota() {
   fi
 }
 
-check_quota ec2 L-DB2E81BA "${GPU_VCPUS}" "Running On-Demand G and VT instances (vCPU)"
+# The quota depends on the instance family, not just on the vCPU count. G, GR and VT types
+# count against one quota and P types against a different one, and both are measured in vCPU.
+# Picking a different GPU type therefore changes which quota to check as well as how much of
+# it is needed.
+case "${GPU_INSTANCE_TYPE}" in
+  g*)  GPU_QUOTA_CODE="L-DB2E81BA"; GPU_QUOTA_NAME="Running On-Demand G and VT instances (vCPU)" ;;
+  p*)  GPU_QUOTA_CODE="L-417A185B"; GPU_QUOTA_NAME="Running On-Demand P instances (vCPU)" ;;
+  *)   GPU_QUOTA_CODE=""; GPU_QUOTA_NAME="" ;;
+esac
+
+if [[ -n "${GPU_QUOTA_CODE}" ]]; then
+  check_quota ec2 "${GPU_QUOTA_CODE}" "${GPU_VCPUS}" "${GPU_QUOTA_NAME}"
+else
+  warn "no known On-Demand quota for the family of ${GPU_INSTANCE_TYPE}; check it by hand"
+  note "Service Quotas, EC2, the 'Running On-Demand ...' entry for that family. It is"
+  note "counted in vCPU, so the requirement is ${GPU_VCPUS}."
+fi
+
 check_quota vpc L-F678F1CE 1 "VPCs per Region"
 check_quota ec2 L-0263D0A3 1 "EC2-VPC Elastic IPs (the NAT gateway uses one)"
 

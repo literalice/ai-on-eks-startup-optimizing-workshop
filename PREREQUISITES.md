@@ -12,21 +12,68 @@ One item has lead time and the rest do not. If you read only one section, read t
 
 ## Start here: the GPU quota
 
-The workshop runs GPU instances one at a time. The default instance type is `gr6.8xlarge`,
-which is 32 vCPU, so the requirement is 32 vCPU of **Running On-Demand G and VT instances**.
+The workshop runs GPU instances one at a time, so the requirement is one node's worth of quota.
+How much that is depends on which instance type you use, because these quotas are counted in
+vCPU rather than in instances.
+
+With the default type, `gr6.8xlarge`, that is **32 vCPU of Running On-Demand G and VT
+instances**:
 
 ```bash
 aws service-quotas get-service-quota --region us-west-2 \
   --service-code ec2 --quota-code L-DB2E81BA
 ```
 
-If the value is below 32, request an increase for quota `L-DB2E81BA`. Requesting 128 leaves
-room to re-run a variant without waiting for the previous node to terminate.
+If the value is below what your type needs, request an increase. Requesting four nodes' worth
+leaves room to re-run a variant without waiting for the previous node to terminate.
 
 **Increases are not granted immediately.** This is the one prerequisite worth handling several
 days ahead. Everything else below can be done on the day.
 
 If the account already runs GPU instances in the same region, they consume the same quota.
+`bin/preflight.sh` reports both the quota and what is already running against it.
+
+### If you use a different instance type
+
+Set `GPU_INSTANCE_TYPE` in `config.env`. Two constraints apply, and the quota to check changes
+with the family:
+
+**The type needs local NVMe instance store.** Steps 3 and 4 place container storage on it. On a
+type without instance store, both of those steps measure the same thing as step 1 and the
+workshop loses half its point. Two or more instance-store disks additionally means
+`instanceStorePolicy: RAID0` stripes rather than just relocating, because Bottlerocket skips a
+single-member array.
+
+**The vCPU count changes the result.** SOCI's parallel unpack is CPU-bound, so a smaller type
+produces a smaller improvement in step 3 and a larger type a larger one. This is not a defect
+in the measurement — it is the finding — but it means a figure from one type does not carry to
+another.
+
+Single-GPU types with instance store, from `describe-instance-types`:
+
+| Type | vCPU | GPU | Instance store | Quota needed |
+|---|---:|---|---|---:|
+| `g6.xlarge` | 4 | L4 24 GB | 1× 250 GB | 4 |
+| `g6.2xlarge` | 8 | L4 24 GB | 1× 450 GB | 8 |
+| `g6.4xlarge` | 16 | L4 24 GB | 1× 600 GB | 16 |
+| **`gr6.8xlarge`** (default) | **32** | **L4 24 GB** | **2× 450 GB** | **32** |
+| `g6.8xlarge` | 32 | L4 24 GB | 2× 450 GB | 32 |
+| `g5.4xlarge` | 16 | A10G 24 GB | 1× 600 GB | 16 |
+| `g5.8xlarge` | 32 | A10G 24 GB | 1× 900 GB | 32 |
+| `g6e.4xlarge` | 16 | L40S 48 GB | 1× 600 GB | 16 |
+| `g6e.8xlarge` | 32 | L40S 48 GB | 2× 450 GB | 32 |
+| `g4dn.4xlarge` | 16 | T4 16 GB | 1× 225 GB | 16 |
+
+All of the above count against **G and VT**, quota `L-DB2E81BA`. A `p` type such as
+`p5.4xlarge` counts against **Running On-Demand P instances**, quota `L-417A185B`, which is a
+separate limit — an account can have plenty of one and none of the other.
+
+`bin/preflight.sh` picks the quota code from the family of whatever is configured and compares
+it against that type's vCPU count, so run it after changing the type rather than reading this
+table.
+
+The GPU memory column matters only if you raise `MODEL_HF_REPO` to a larger model. The default
+model is 2.9 GB and fits on any of these.
 
 ---
 
@@ -241,21 +288,65 @@ kubectl get nodeclaims        # expect no output
 
 ## 最初に: GPU クォータ
 
-ワークショップは GPU インスタンスを 1 台ずつ起動します。既定のインスタンスタイプは
-`gr6.8xlarge`（32 vCPU）なので、**Running On-Demand G and VT instances** の 32 vCPU が必要です。
+ワークショップは GPU インスタンスを 1 台ずつ起動するため、必要なのはノード 1 台分のクォータです。
+それが何 vCPU になるかは使用するインスタンスタイプによって変わります。これらのクォータは
+インスタンス数ではなく vCPU 単位で数えられるためです。
+
+既定のタイプ `gr6.8xlarge` の場合は **Running On-Demand G and VT instances の 32 vCPU** です。
 
 ```bash
 aws service-quotas get-service-quota --region us-west-2 \
   --service-code ec2 --quota-code L-DB2E81BA
 ```
 
-値が 32 未満の場合、クォータ `L-DB2E81BA` の引き上げを申請してください。128 を申請しておくと、
+値が使用するタイプの必要量を下回る場合は引き上げを申請してください。ノード 4 台分を申請しておくと、
 前のノードの終了を待たずに variant を再実行する余裕ができます。
 
 **引き上げは即時に承認されるものではありません。** 数日前から進めておく価値があるのはこの項目
 だけです。以下はすべて当日でも対応できます。
 
 同じリージョンで既に GPU インスタンスを動かしている場合、同じクォータを消費します。
+`bin/preflight.sh` はクォータと、既にそれを消費して動いているものの両方を報告します。
+
+### 別のインスタンスタイプを使う場合
+
+`config.env` の `GPU_INSTANCE_TYPE` を設定します。制約が 2 つあり、確認すべきクォータもファミリー
+によって変わります。
+
+**ローカル NVMe インスタンスストアが必要です。** ステップ 3 と 4 はそこにコンテナストレージを
+配置します。インスタンスストアを持たないタイプでは、この 2 つのステップがステップ 1 と同じものを
+計測することになり、ワークショップの半分が意味を失います。ディスクが 2 本以上あれば、
+`instanceStorePolicy: RAID0` は移動だけでなくストライピングも行います。Bottlerocket はメンバーが
+1 つのアレイを省くためです。
+
+**vCPU 数は結果を変えます。** SOCI の並列展開は CPU バウンドなので、小さいタイプではステップ 3 の
+改善幅が小さくなり、大きいタイプでは大きくなります。これは計測の欠陥ではなく計測結果そのもの
+ですが、あるタイプで得た数字が別のタイプには当てはまらないことを意味します。
+
+`describe-instance-types` から取得した、インスタンスストアを持つシングル GPU のタイプです。
+
+| タイプ | vCPU | GPU | インスタンスストア | 必要クォータ |
+|---|---:|---|---|---:|
+| `g6.xlarge` | 4 | L4 24 GB | 250 GB × 1 | 4 |
+| `g6.2xlarge` | 8 | L4 24 GB | 450 GB × 1 | 8 |
+| `g6.4xlarge` | 16 | L4 24 GB | 600 GB × 1 | 16 |
+| **`gr6.8xlarge`**（既定） | **32** | **L4 24 GB** | **450 GB × 2** | **32** |
+| `g6.8xlarge` | 32 | L4 24 GB | 450 GB × 2 | 32 |
+| `g5.4xlarge` | 16 | A10G 24 GB | 600 GB × 1 | 16 |
+| `g5.8xlarge` | 32 | A10G 24 GB | 900 GB × 1 | 32 |
+| `g6e.4xlarge` | 16 | L40S 48 GB | 600 GB × 1 | 16 |
+| `g6e.8xlarge` | 32 | L40S 48 GB | 450 GB × 2 | 32 |
+| `g4dn.4xlarge` | 16 | T4 16 GB | 225 GB × 1 | 16 |
+
+上記はすべて **G and VT**（クォータ `L-DB2E81BA`）に計上されます。`p5.4xlarge` のような `p` 系は
+**Running On-Demand P instances**（クォータ `L-417A185B`）で、これは別枠です。一方に十分な枠が
+あっても他方はゼロ、ということが起こり得ます。
+
+`bin/preflight.sh` は設定されたタイプのファミリーからクォータコードを選び、そのタイプの vCPU 数と
+比較します。タイプを変更した場合は、この表を読むのではなくスクリプトを実行してください。
+
+GPU メモリの列が問題になるのは、`MODEL_HF_REPO` をより大きいモデルに変更する場合だけです。既定の
+モデルは 2.9 GB で、上記のいずれにも収まります。
 
 ---
 
