@@ -126,9 +126,9 @@ Check an account against all of this without creating anything:
 bin/preflight.sh
 ```
 
-[PREREQUISITES.md](PREREQUISITES.md) covers the same ground in a form that can be sent to
-someone before a session: what gets created, what permissions are needed, what the script
-cannot verify, and the cost.
+[PREREQUISITES.md](PREREQUISITES.md) states the requirements in full and separately from the
+rest of this document: the instance type and its constraints, the GPU quota and how it is
+counted, GPU capacity, the permissions and resources involved, the cost and the duration.
 
 ### Cost and time
 
@@ -740,8 +740,9 @@ bin/verify_config.sh soci   # 実行後に、効いたことを確認
 bin/preflight.sh
 ```
 
-[PREREQUISITES.md](PREREQUISITES.md) は同じ内容を、セッション前に送付できる形にまとめて
-います。作成されるもの、必要な権限、スクリプトで確認できない範囲、費用を記載しています。
+[PREREQUISITES.md](PREREQUISITES.md) は必要条件を、本書とは独立した形で網羅しています。
+インスタンスタイプとその制約、GPU クォータとその数え方、GPU 容量、関係する権限とリソース、
+費用、所要時間です。
 
 ### 費用と時間
 

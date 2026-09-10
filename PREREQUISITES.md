@@ -1,54 +1,37 @@
-# Account prerequisites
+# Prerequisites
 
 **English** | [日本語](#japanese)
 
-Read this if you want to run the workshop in your own AWS account, either alongside the
-session or afterwards. The session itself does not require it — the presenter runs everything
-in a separate account and shares the screen — so nothing here blocks attending.
-
-One item has lead time and the rest do not. If you read only one section, read the quota one.
+What an AWS account needs before this workshop can run in it. Four things determine whether it
+can run and what it will cost: the GPU instance type, the GPU quota, GPU capacity at the time of
+the run, and the account's permissions. Cost and duration follow from the first of those.
 
 ---
 
-## Start here: the GPU quota
+## 1. The GPU instance type
 
-The workshop runs GPU instances one at a time, so the requirement is one node's worth of quota.
-How much that is depends on which instance type you use, because these quotas are counted in
-vCPU rather than in instances.
-
-With the default type, `gr6.8xlarge`, that is **32 vCPU of Running On-Demand G and VT
-instances**:
+Set in `config.env`:
 
 ```bash
-aws service-quotas get-service-quota --region us-west-2 \
-  --service-code ec2 --quota-code L-DB2E81BA
+export GPU_INSTANCE_TYPE="gr6.8xlarge"
 ```
 
-If the value is below what your type needs, request an increase. Requesting four nodes' worth
-leaves room to re-run a variant without waiting for the previous node to terminate.
+Every variant runs on this one type, so that nothing in the comparison is explained by
+hardware. Two properties of the type are requirements rather than preferences.
 
-**Increases are not granted immediately.** This is the one prerequisite worth handling several
-days ahead. Everything else below can be done on the day.
+**Local NVMe instance store.** Steps 3 and 4 place container storage on it. A type without
+instance store makes both of those steps measure the same thing as step 1.
 
-If the account already runs GPU instances in the same region, they consume the same quota.
-`bin/preflight.sh` reports both the quota and what is already running against it.
+**Two or more instance-store disks**, if the striping in step 3 is to be exercised.
+Bottlerocket skips the array when there is only one disk, so `instanceStorePolicy: RAID0`
+relocates container storage without striping it. The figures are still valid with one disk;
+one part of step 3 stops applying.
 
-### If you use a different instance type
+The vCPU count also changes the result. SOCI's parallel unpack is CPU-bound, so a smaller type
+produces a smaller improvement in step 3 and a larger type a larger one. A figure obtained on
+one type does not carry to another.
 
-Set `GPU_INSTANCE_TYPE` in `config.env`. Two constraints apply:
-
-**The type needs local NVMe instance store.** Steps 3 and 4 place container storage on it. On a
-type without instance store, both of those steps measure the same thing as step 1 and the
-workshop loses half its point. Two or more instance-store disks additionally means
-`instanceStorePolicy: RAID0` stripes rather than just relocating, because Bottlerocket skips a
-single-member array.
-
-**The vCPU count changes the result.** SOCI's parallel unpack is CPU-bound, so a smaller type
-produces a smaller improvement in step 3 and a larger type a larger one. This is not a defect
-in the measurement — it is the finding — but it means a figure from one type does not carry to
-another.
-
-Single-GPU types with instance store, from `describe-instance-types`:
+Single-GPU types with instance store:
 
 | Type | vCPU | GPU | Instance store | Quota needed |
 |---|---:|---|---|---:|
@@ -63,135 +46,214 @@ Single-GPU types with instance store, from `describe-instance-types`:
 | `g6e.8xlarge` | 32 | L40S 48 GB | 2× 450 GB | 32 |
 | `g4dn.4xlarge` | 16 | T4 16 GB | 1× 225 GB | 16 |
 
-All of the above count against **G and VT**, quota `L-DB2E81BA`, so switching between them does
-not need a different quota approved — only enough of the same one.
-
-`bin/preflight.sh` compares the live quota against the configured type's vCPU count, so run it
-after changing the type rather than reading this table.
-
-The GPU memory column matters only if you raise `MODEL_HF_REPO` to a larger model. The default
+The GPU memory column matters only if `MODEL_HF_REPO` is raised to a larger model. The default
 model is 2.9 GB and fits on any of these.
 
-### P types are not used
+### P types are refused
 
-`bin/prep.sh` and `bin/preflight.sh` both refuse a `p` type. This is a cost guard rather than a
-technical limit, and there are three reasons for it.
+`bin/prep.sh` and `bin/preflight.sh` both reject a `p` type. This is a cost constraint, not a
+technical one.
 
-The model is 1.5B parameters and fits in 24 GB, so a P type produces the same measurement. It
-costs several times as much while doing so:
+The model is 1.5B parameters and fits in 24 GB, so a P type produces the same measurement at
+several times the hourly rate. On-Demand in `us-west-2`:
 
-| Type | On-Demand, `us-west-2` |
+| Type | USD/hour |
 |---|---:|
-| `g6.4xlarge` | 1.32 USD/hour |
-| `gr6.8xlarge` (default) | 2.45 USD/hour |
-| `p5.4xlarge` | 6.88 USD/hour |
-| `p4d.24xlarge` | 21.96 USD/hour |
+| `g6.4xlarge` | 1.32 |
+| `gr6.8xlarge` | 2.45 |
+| `p5.4xlarge` | 6.88 |
+| `p4d.24xlarge` | 21.96 |
 
-And P types count against a separate quota, `L-417A185B` — an account prepared for this
-workshop by raising the G quota would not launch one at all, which surfaces as a variant that
-stays Pending.
+P types also count against a different quota, `L-417A185B` instead of `L-DB2E81BA`. An account
+whose G quota was raised for this workshop will not launch one, and that appears as a variant
+stuck `Pending` rather than as a quota error.
 
-If you have a reason, `ALLOW_LARGE_GPU_FAMILY=1` overrides both checks. The cost figures below
-assume a G type.
+`ALLOW_LARGE_GPU_FAMILY=1` overrides both checks. The cost figures below assume a G type.
 
 ---
 
-## Run the check script
+## 2. The GPU quota
 
-The repository includes a read-only check that covers everything verifiable without creating
-anything:
+These quotas are counted in vCPU, not in instances. The variants run one at a time, so the
+requirement is one node's worth of the type in use: 32 vCPU for `gr6.8xlarge`, 16 for
+`g6.4xlarge`, and so on from the table above.
 
 ```bash
-git clone <repository URL>
-cd ai-on-eks-startup-optimizing-workshop
-bin/preflight.sh
+aws service-quotas get-service-quota --region us-west-2 \
+  --service-code ec2 --quota-code L-DB2E81BA
 ```
 
-It reports the tools, credentials, quotas, existing usage, the container image, the model
-repository, the Kubernetes version, the Bottlerocket AMI version and the instance store on the
-chosen instance type. It exits non-zero if a required check fails, so the output can be sent
-back as-is.
+`L-DB2E81BA` is *Running On-Demand G and VT instances*. Every type in the table above counts
+against it, so changing between them needs more of the same quota rather than a different one.
 
-It also prints what it cannot check, which is the IAM permissions described below.
+Four nodes' worth allows a variant to be re-run without waiting for the previous node to
+terminate.
+
+GPU instances already running in the same region consume the same quota, including instances
+belonging to unrelated work.
 
 ---
 
-## What gets created
+## 3. GPU capacity
 
-Terraform creates all of this in one region, in a VPC of its own. Nothing is placed in an
-existing VPC and nothing existing is modified.
+Separate from the quota, and not something a quota increase affects. Capacity is per instance
+type per Availability Zone, and it changes over minutes.
+
+A zone with no capacity for the chosen type does not stop Karpenter, which can use another
+zone. It does affect the measurement: Karpenter holds a refused offering unavailable for three
+minutes, and a pod submitted during that window waits out the TTL before a node is requested at
+all. That wait is added to the variant's total with no error to explain it.
+
+No API reports available capacity. `bin/check_capacity.sh` launches one instance per subnet and
+terminates it immediately, which is the only way to know:
+
+```bash
+bin/check_capacity.sh
+```
+
+On failure it prints the error from EC2, which names the Availability Zones that can serve the
+request at that moment.
+
+This needs the VPC to exist, so it runs after Terraform rather than before.
+
+---
+
+## 4. Permissions
+
+An administrative role, or one that can create the resources listed below, including IAM roles
+and policies.
+
+This cannot be verified in advance. IAM has no dry-run, and a permissions boundary or a Service
+Control Policy denies at apply time without being visible beforehand. If the account uses a
+permissions boundary, the roles Terraform creates need it applied, which is a change to
+`terraform/main.tf`.
+
+### What gets created
+
+All of it in one region, in a VPC of its own. Nothing is placed in an existing VPC and nothing
+existing is modified.
 
 | | |
 |---|---|
 | VPC | One, with private and public subnets across three Availability Zones, one NAT gateway (which uses one Elastic IP), and an S3 Gateway VPC endpoint |
-| EKS clusters | Two. One with self-managed Karpenter, one with EKS Auto Mode. Two are needed because both controllers own the same `karpenter.sh` CRDs |
-| Managed node group | One small group of two `m6i.large` nodes per cluster, for CoreDNS and the Karpenter controller |
+| EKS clusters | Two. One with self-managed Karpenter, one with EKS Auto Mode. Two are required because both controllers own the same `karpenter.sh` CRDs |
+| Managed node group | One group of two `m6i.large` nodes per cluster, for CoreDNS and the Karpenter controller |
 | GPU nodes | Created and removed by Karpenter during the runs, one at a time |
-| IAM | Roles and policies for the two clusters, the Karpenter controller, the nodes, and one role bound to the workshop's service account through EKS Pod Identity |
+| IAM | Roles and policies for the two clusters, the Karpenter controller, the nodes, and one role bound to a service account through EKS Pod Identity |
 | S3 | One bucket for the model weights, with public access blocked and server-side encryption enabled |
 | EBS snapshot | One, holding the container image layers, built by a temporary instance that is terminated afterwards |
 | Helm release | Karpenter, on the first cluster |
 
-Teardown is `terraform destroy` plus deleting the snapshot and the bucket, which the
-repository documents.
+Teardown is `terraform destroy`. The snapshot and the bucket are outside Terraform's state and
+are removed separately.
+
+### Other service quotas
+
+| Quota | Code | Needed | Default |
+|---|---|---:|---:|
+| VPCs per Region | `L-F678F1CE` | 1 | 5 |
+| EC2-VPC Elastic IPs | `L-0263D0A3` | 1 | 5 |
+
+Existing VPCs and Elastic IPs count against these, so an account already near either default
+needs an increase for a single-vCPU-reason unrelated to GPUs.
 
 ---
 
-## Permissions
+## 5. Cost
 
-The account needs to be able to create the resources listed above. In practice this means an
-administrative role, or one that can create IAM roles and policies. `bin/preflight.sh` cannot
-verify this: IAM has no dry-run, and a permissions boundary or a Service Control Policy can
-deny at apply time without being visible in advance.
+About **USD 6 to 12** for one pass through the workshop.
 
-If your account uses a permissions boundary, the roles Terraform creates will need it applied.
-That is a change to `terraform/main.tf` rather than something to request, and it is worth
-identifying before the day.
+| | |
+|---|---|
+| Two EKS clusters and a NAT gateway | about USD 0.35 per hour, whether or not a GPU node exists |
+| One GPU node | 1.32 to 2.45 USD per hour depending on the type, and only while a run is in progress |
 
----
+The distinction matters for an environment left standing. The clusters are a few dollars a day.
+A GPU node left running is not, and one can be left behind: Karpenter keeps a node for 30
+minutes after its last pod, which the warm runs depend on.
 
-## Region
-
-`us-west-2` by default, set in `config.env`. Another region works if it offers the GPU
-instance type, EKS 1.34 and the AWS Deep Learning Container image. `bin/preflight.sh` checks
-all three against whichever region is configured.
-
----
-
-## Cost and time
-
-About **USD 6 to 12** in total, and about **two hours**, most of which runs unattended.
-
-Two EKS clusters and a NAT gateway cost about **USD 0.35 per hour** while they exist, whether
-or not a GPU node is running. A GPU node costs roughly USD 2 per hour and exists only during a
-run. Leaving the environment up overnight is therefore a few dollars; leaving a GPU node up
-overnight is not.
-
-The one step to schedule rather than run live is the EBS snapshot build, which takes 14 minutes
-for this image.
+```bash
+kubectl -n bench delete pods --all
+kubectl get nodeclaims        # expect no output
+```
 
 ---
 
-## What you do not need
+## 6. Time
 
-- **No registry credentials.** The container image is an AWS Deep Learning Container and is
-  readable from any AWS account.
-- **No Hugging Face token.** The model is Qwen2.5-1.5B-Instruct, which is not gated.
-- **No licence for Run:ai Model Streamer.** It is Apache-2.0 and already present in the
-  container image.
-- **No custom AMI build.** The EKS-optimized Bottlerocket NVIDIA AMI is used as published.
-- **No GPU quota beyond one node**, unless you want to run variants concurrently, which the
-  workshop does not.
+About **two hours** in total, most of which needs no attention.
+
+| Step | Duration |
+|---|---|
+| `terraform apply` | 15 to 20 minutes, mostly two EKS control planes |
+| `snapshot/build-snapshot.sh` | 14 minutes for a 9 GB image, unattended |
+| `snapshot/stage-model.sh` | a few minutes, depending on the connection to Hugging Face |
+| `bin/prep.sh` | under a minute |
+| One variant | 1 to 3 minutes, plus node provisioning for a cold run |
+| All variants and both later phases | about 25 minutes |
+
+The snapshot build and the model staging are the two that take minutes without producing
+anything to watch, and neither is needed again unless the image or the model changes.
 
 ---
 
-## If several people want to run it
+## Tools and region
 
-One AWS account can hold several of these environments, but they cannot share one. Give each
-person their own `NAME_PREFIX`, their own clone and their own Terraform state.
+- `aws` (v2), `kubectl`, `terraform`, `jq`, `python3`
+- The `hf` CLI, for staging the model: `pip install --upgrade 'huggingface_hub[cli]'`
+- `us-west-2` by default, set in `config.env`. Another region works if it offers the GPU
+  instance type, EKS 1.34 and the AWS Deep Learning Container image.
 
-The prefix has to be set in two places, and they have to agree. `config.env` is what the
-scripts read, and `name_prefix` is what Terraform reads:
+Kubernetes 1.34 or above is required. The EKS-optimized Bottlerocket NVIDIA AMI ships NVIDIA
+driver 580 from 1.34 onwards, and the CUDA 13 image used here needs driver 580.
+
+Bottlerocket 1.44.0 or above is required for step 3. SOCI parallel pull/unpack was added in
+that version, and on an earlier one the setting is ignored without an error, so step 3 would
+measure the same thing as step 1.
+
+---
+
+## What is not required
+
+- **Registry credentials.** The container image is an AWS Deep Learning Container, readable
+  from any AWS account.
+- **A Hugging Face token.** The default model, Qwen2.5-1.5B-Instruct, is not gated.
+- **A licence for Run:ai Model Streamer.** Apache-2.0, and already present in the container
+  image.
+- **A custom AMI.** The EKS-optimized Bottlerocket NVIDIA AMI is used as published.
+- **GPU quota beyond one node**, unless variants are run concurrently, which this workshop
+  does not do.
+
+---
+
+## Checking all of the above
+
+```bash
+bin/preflight.sh
+```
+
+Read-only, creates nothing. It reports the tools, credentials, the quota for whichever instance
+type is configured, GPU instances already consuming it, whether the container image and the
+model repository are readable, the Kubernetes version, the Bottlerocket AMI version, and the
+instance store on the configured type. It exits non-zero when a required check fails.
+
+It also prints what it cannot check, which is the permissions above and GPU capacity.
+
+After `terraform apply`, `bin/verify_env.sh` checks what was built, and `bin/check_capacity.sh`
+checks capacity before a measurement run.
+
+---
+
+## Running it more than once in one account
+
+Several of these environments can exist in one account. They cannot share one, because the
+measurements are of a cold first pod: `bin/reset.sh` deletes the pods labelled for the variant
+it is about to run and then the NodeClaim, which terminates the instance. Two people on one
+cluster would delete each other's nodes mid-run, and a separate namespace does not help,
+because each variant is pinned to one node pool and the node pool is what gets reset.
+
+Each environment needs its own `NAME_PREFIX`, its own clone and its own Terraform state. The
+prefix is set in two places and they have to agree:
 
 ```bash
 # config.env
@@ -202,89 +264,19 @@ export NAME_PREFIX="br-startup-alice"
 terraform -chdir=terraform apply -var 'name_prefix=br-startup-alice'
 ```
 
-Almost everything is named from that prefix: both clusters, the VPC, the model bucket, the IAM
-policy, the Karpenter subnet discovery tag and the snapshot. If the two disagree, `bin/prep.sh`
-will look for clusters that Terraform did not create.
+Almost everything is named from it: both clusters, the VPC, the model bucket, the IAM policy,
+the Karpenter subnet discovery tag and the snapshot. If the two disagree, `bin/prep.sh` looks
+for clusters Terraform did not create.
 
-### Why one environment cannot be shared
+Per additional environment: one VPC, one Elastic IP, one node's worth of GPU quota, and the
+cost above. The VPC and Elastic IP defaults of 5 are usually the limit reached first.
 
-The measurements are of a cold first pod, so the scripts delete what a previous run left
-behind. `bin/reset.sh` removes the pods labelled for the variant it is about to run **and the
-NodeClaim**, which terminates the instance:
+Concurrent runs draw on the same GPU capacity in the same Availability Zones, so they make the
+capacity problem in section 3 more likely. Staggering the runs avoids it.
 
-```bash
-kubectl -n bench delete pod -l "workshop-variant=${variant}"
-kubectl delete nodeclaim -l "karpenter.sh/nodepool=${variant}"
-```
-
-Two people on one cluster would delete each other's nodes mid-run. A separate namespace does
-not help, because each variant is pinned to one node pool and the node pool is what gets
-reset.
-
-### What to budget for each additional person
-
-| Per person | Note |
-|---|---|
-| 1 VPC | The default quota is 5 per region, and existing VPCs count |
-| 1 Elastic IP | For the NAT gateway. The default quota is also 5 |
-| 32 vCPU of G and VT | Concurrent runs each need a node at the same time |
-| About USD 6 to 12 | Costs do not share |
-
-The GPU quota is the one to check against the number of people. Four people running
-concurrently need 128 vCPU, not 32.
-
-### The constraint that is not a quota
-
-Concurrent runs draw on the same GPU capacity in the same Availability Zones. Capacity is per
-instance type per zone, and a zone can be short of one type while another type is fine. When
-Karpenter is refused, it holds that offering unavailable for three minutes, and the pod waits
-out the TTL before a node is even requested. That wait lands in the measurement with no error
-to explain it.
-
-Two ways to reduce that. Have everyone run `bin/check_capacity.sh` before starting and agree
-on an instance type that has capacity in every zone. Or stagger the runs rather than starting
-together, which also avoids everyone hitting the registry at once.
-
-### What can be shared
-
-The snapshot and the model bucket are read-only once built, so one person can build them and
-the others can point at them, which saves each of the others the 14-minute snapshot build:
-
-```bash
-# in config.env
-export MODEL_BUCKET="<the bucket the first person created>"
-# and in results/snapshot-id.txt, or via the SSM parameter /<their prefix>/image-cache-snapshot-id
-```
-
-Within one account this needs no cross-account policy. The reading role needs `s3:GetObject`
-on that bucket, which is what `${NAME_PREFIX}-model-weights-read` grants for the bucket the
-same prefix created, so sharing means either granting the other prefixes' roles access or
-staging the model per person.
-
----
-
-## On the day
-
-GPU capacity varies by instance type and Availability Zone, and it changes within minutes. A
-zone with no capacity for the chosen type does not stop Karpenter from using another zone, but
-it does add a wait to the measurement, so it is worth checking shortly before starting:
-
-```bash
-bin/check_capacity.sh
-```
-
-This launches one instance per subnet and terminates it immediately, because no API reports
-available capacity. If it fails, the error from EC2 names the Availability Zones that can serve
-the request at that moment.
-
-After the last run, check that no GPU node is still up. Phase 3 ends with a pod running, and
-Karpenter keeps the node for 30 minutes after the last pod leaves, which is deliberate — the
-warm runs need it — but it means a finished session can leave a GPU instance behind.
-
-```bash
-kubectl -n bench delete pods --all
-kubectl get nodeclaims        # expect no output
-```
+The snapshot and the model bucket are read-only once built and can be shared, which saves each
+of the others the snapshot build. Within one account this needs no cross-account policy, but
+the reading role needs `s3:GetObject` on the other prefix's bucket.
 
 <br>
 
@@ -293,55 +285,40 @@ kubectl get nodeclaims        # expect no output
 
 <a id="japanese"></a>
 
-# アカウントの前提条件
+# 前提条件
 
-[English](#account-prerequisites) | **日本語**
+[English](#prerequisites) | **日本語**
 
-ワークショップを自身の AWS アカウントで実行する場合にお読みください。セッションと並行して
-実行することも、後日実行することもできます。セッション自体には不要です。発表者が別アカウントで
-すべてを実行し画面を共有するため、ここに書かれた準備が整っていなくても参加に支障はありません。
-
-リードタイムが必要な項目は 1 つだけです。1 節だけ読む場合はクォータの節をお読みください。
+本ワークショップを実行するために AWS アカウントに必要なものです。実行可否と費用を決めるのは 4 点
+です。GPU インスタンスタイプ、GPU クォータ、実行時点の GPU 容量、アカウントの権限です。費用と
+所要時間は 1 点目から決まります。
 
 ---
 
-## 最初に: GPU クォータ
+## 1. GPU インスタンスタイプ
 
-ワークショップは GPU インスタンスを 1 台ずつ起動するため、必要なのはノード 1 台分のクォータです。
-それが何 vCPU になるかは使用するインスタンスタイプによって変わります。これらのクォータは
-インスタンス数ではなく vCPU 単位で数えられるためです。
-
-既定のタイプ `gr6.8xlarge` の場合は **Running On-Demand G and VT instances の 32 vCPU** です。
+`config.env` で設定します。
 
 ```bash
-aws service-quotas get-service-quota --region us-west-2 \
-  --service-code ec2 --quota-code L-DB2E81BA
+export GPU_INSTANCE_TYPE="gr6.8xlarge"
 ```
 
-値が使用するタイプの必要量を下回る場合は引き上げを申請してください。ノード 4 台分を申請しておくと、
-前のノードの終了を待たずに variant を再実行する余裕ができます。
+すべての variant がこの 1 つのタイプで動きます。比較の中にハードウェアで説明できる差を作らない
+ためです。このタイプの 2 つの性質は、好みではなく要件です。
 
-**引き上げは即時に承認されるものではありません。** 数日前から進めておく価値があるのはこの項目
-だけです。以下はすべて当日でも対応できます。
+**ローカル NVMe インスタンスストア。** ステップ 3 と 4 はそこにコンテナストレージを配置します。
+インスタンスストアを持たないタイプでは、この 2 つのステップがステップ 1 と同じものを計測します。
 
-同じリージョンで既に GPU インスタンスを動かしている場合、同じクォータを消費します。
-`bin/preflight.sh` はクォータと、既にそれを消費して動いているものの両方を報告します。
+**ステップ 3 のストライピングを扱う場合は、インスタンスストアが 2 本以上。** Bottlerocket は
+ディスクが 1 本の場合アレイを省くため、`instanceStorePolicy: RAID0` はコンテナストレージを移動
+しますがストライピングはしません。1 本でも計測値は妥当で、ステップ 3 の一部が当てはまらなくなる
+だけです。
 
-### 別のインスタンスタイプを使う場合
+vCPU 数も結果を変えます。SOCI の並列展開は CPU バウンドなので、小さいタイプではステップ 3 の
+改善幅が小さくなり、大きいタイプでは大きくなります。あるタイプで得た数字は別のタイプには
+当てはまりません。
 
-`config.env` の `GPU_INSTANCE_TYPE` を設定します。制約が 2 つあります。
-
-**ローカル NVMe インスタンスストアが必要です。** ステップ 3 と 4 はそこにコンテナストレージを
-配置します。インスタンスストアを持たないタイプでは、この 2 つのステップがステップ 1 と同じものを
-計測することになり、ワークショップの半分が意味を失います。ディスクが 2 本以上あれば、
-`instanceStorePolicy: RAID0` は移動だけでなくストライピングも行います。Bottlerocket はメンバーが
-1 つのアレイを省くためです。
-
-**vCPU 数は結果を変えます。** SOCI の並列展開は CPU バウンドなので、小さいタイプではステップ 3 の
-改善幅が小さくなり、大きいタイプでは大きくなります。これは計測の欠陥ではなく計測結果そのもの
-ですが、あるタイプで得た数字が別のタイプには当てはまらないことを意味します。
-
-`describe-instance-types` から取得した、インスタンスストアを持つシングル GPU のタイプです。
+インスタンスストアを持つシングル GPU のタイプです。
 
 | タイプ | vCPU | GPU | インスタンスストア | 必要クォータ |
 |---|---:|---|---|---:|
@@ -356,134 +333,209 @@ aws service-quotas get-service-quota --region us-west-2 \
 | `g6e.8xlarge` | 32 | L40S 48 GB | 450 GB × 2 | 32 |
 | `g4dn.4xlarge` | 16 | T4 16 GB | 225 GB × 1 | 16 |
 
-上記はすべて **G and VT**（クォータ `L-DB2E81BA`）に計上されます。この中で切り替える場合、別の
-クォータの承認は不要で、同じクォータの枠が足りていれば済みます。
-
-`bin/preflight.sh` は設定されたタイプの vCPU 数と実際のクォータを比較します。タイプを変更した
-場合は、この表を読むのではなくスクリプトを実行してください。
-
 GPU メモリの列が問題になるのは、`MODEL_HF_REPO` をより大きいモデルに変更する場合だけです。既定の
 モデルは 2.9 GB で、上記のいずれにも収まります。
 
-### P 系は使いません
+### P 系は拒否されます
 
-`bin/prep.sh` と `bin/preflight.sh` はどちらも `p` 系を拒否します。これは技術的な制限ではなく
-コストのガードで、理由は 3 つあります。
+`bin/prep.sh` と `bin/preflight.sh` はどちらも `p` 系を拒否します。これは技術的な制約ではなく
+費用の制約です。
 
-モデルは 1.5B パラメータで 24 GB に収まるため、P 系でも計測結果は同じです。そのうえで数倍の費用が
-かかります。
+モデルは 1.5B パラメータで 24 GB に収まるため、P 系でも計測結果は同じで、時間単価が数倍になります。
+On-Demand、`us-west-2` の価格です。
 
-| タイプ | On-Demand、`us-west-2` |
+| タイプ | USD/時 |
 |---|---:|
-| `g6.4xlarge` | 1.32 USD/時 |
-| `gr6.8xlarge`（既定） | 2.45 USD/時 |
-| `p5.4xlarge` | 6.88 USD/時 |
-| `p4d.24xlarge` | 21.96 USD/時 |
+| `g6.4xlarge` | 1.32 |
+| `gr6.8xlarge` | 2.45 |
+| `p5.4xlarge` | 6.88 |
+| `p4d.24xlarge` | 21.96 |
 
-そして P 系は別枠のクォータ `L-417A185B` に計上されます。G のクォータを引き上げて本ワークショップに
-備えたアカウントでは、P 系はそもそも起動しません。これは variant が Pending のままになる形で
-現れます。
+P 系は `L-DB2E81BA` ではなく `L-417A185B` という別のクォータに計上されます。本ワークショップの
+ために G のクォータを引き上げたアカウントでは起動せず、クォータのエラーではなく **variant が
+`Pending` のまま**という形で現れます。
 
-理由がある場合は `ALLOW_LARGE_GPU_FAMILY=1` で両方のチェックを上書きできます。以下の費用の記載は
-G 系を前提としています。
+`ALLOW_LARGE_GPU_FAMILY=1` で両方のチェックを上書きできます。以下の費用は G 系を前提としています。
 
 ---
 
-## チェックスクリプトの実行
+## 2. GPU クォータ
 
-リポジトリには、何も作成せずに確認できる範囲をすべて検査する読み取り専用のスクリプトが
-含まれています。
+これらのクォータはインスタンス数ではなく **vCPU 単位**で数えられます。variant は 1 台ずつ実行
+するため、必要なのは使用するタイプのノード 1 台分です。`gr6.8xlarge` なら 32 vCPU、`g6.4xlarge`
+なら 16 で、以降は上記の表のとおりです。
 
 ```bash
-git clone <リポジトリ URL>
-cd ai-on-eks-startup-optimizing-workshop
-bin/preflight.sh
+aws service-quotas get-service-quota --region us-west-2 \
+  --service-code ec2 --quota-code L-DB2E81BA
 ```
 
-ツール、認証情報、クォータ、既存の使用状況、コンテナイメージ、モデルリポジトリ、Kubernetes
-バージョン、Bottlerocket AMI のバージョン、選択したインスタンスタイプのインスタンスストアを
-確認します。必須項目が失敗した場合は非ゼロで終了するため、出力をそのまま返送いただけます。
+`L-DB2E81BA` は *Running On-Demand G and VT instances* です。上記の表のタイプはすべてここに
+計上されるため、この中で切り替える場合に必要なのは別のクォータではなく同じクォータの追加枠です。
 
-確認できない範囲（後述の IAM 権限）も出力します。
+ノード 4 台分あれば、前のノードの終了を待たずに variant を再実行できます。
+
+同じリージョンで既に動いている GPU インスタンスは同じクォータを消費します。本ワークショップと
+無関係な作業のインスタンスも含みます。
 
 ---
 
-## 作成されるもの
+## 3. GPU 容量
 
-Terraform は以下をすべて 1 リージョン内の専用 VPC に作成します。既存の VPC には何も配置せず、
-既存のリソースを変更しません。
+クォータとは別で、クォータの引き上げでは変わりません。容量はインスタンスタイプと AZ の組み合わせ
+ごとで、分単位で変動します。
+
+選択したタイプの容量が無い AZ があっても Karpenter は止まらず、別の AZ を使えます。ただし計測には
+影響します。Karpenter は拒否された offering を 3 分間 unavailable に保持し、その間に投入された
+Pod はノードが要求される前に TTL を待ちます。この待ち時間は、説明するエラーを伴わずに variant の
+合計に加算されます。
+
+利用可能な容量を報告する API はありません。`bin/check_capacity.sh` は各サブネットに 1 台起動して
+即座に終了させます。これが確認する唯一の方法です。
+
+```bash
+bin/check_capacity.sh
+```
+
+失敗した場合は EC2 のエラーを表示します。そこにはその時点で要求を満たせる AZ が示されます。
+
+これは VPC の存在が前提なので、Terraform の前ではなく後に実行します。
+
+---
+
+## 4. 権限
+
+管理者ロール、または後述のリソースを作成できるロールです。IAM ロールとポリシーの作成を含みます。
+
+これは事前に検証できません。IAM に dry-run が無く、Permissions Boundary や Service Control Policy
+は事前に見えない形で apply 時に拒否します。アカウントで Permissions Boundary を使用している場合、
+Terraform が作成するロールにもそれを適用する必要があり、これは `terraform/main.tf` の変更になります。
+
+### 作成されるもの
+
+すべて 1 リージョン内の専用 VPC に作成します。既存の VPC には何も配置せず、既存のリソースを変更
+しません。
 
 | | |
 |---|---|
 | VPC | 1 つ。3 つの AZ にまたがるプライベート/パブリックサブネット、NAT ゲートウェイ 1 つ（Elastic IP を 1 つ使用）、S3 Gateway VPC エンドポイント |
 | EKS クラスター | 2 面。1 面は自己管理の Karpenter、1 面は EKS Auto Mode。両コントローラが同じ `karpenter.sh` CRD を所有するため 2 面必要です |
-| マネージドノードグループ | 各クラスターに `m6i.large` 2 台の小さなグループ 1 つ。CoreDNS と Karpenter コントローラ用 |
+| マネージドノードグループ | 各クラスターに `m6i.large` 2 台のグループ 1 つ。CoreDNS と Karpenter コントローラ用 |
 | GPU ノード | 実行中に Karpenter が 1 台ずつ作成・削除します |
-| IAM | 2 つのクラスター、Karpenter コントローラ、ノード用のロールとポリシー、および EKS Pod Identity でワークショップのサービスアカウントに紐付けるロール 1 つ |
+| IAM | 2 つのクラスター、Karpenter コントローラ、ノード用のロールとポリシー、および EKS Pod Identity でサービスアカウントに紐付けるロール 1 つ |
 | S3 | モデルウェイト用のバケット 1 つ。パブリックアクセスをブロックし、サーバーサイド暗号化を有効化 |
 | EBS スナップショット | 1 つ。コンテナイメージのレイヤを保持します。一時インスタンスが作成し、そのインスタンスは終了します |
 | Helm リリース | Karpenter。1 面目のクラスターに |
 
-撤去は `terraform destroy` と、スナップショットおよびバケットの削除です。手順はリポジトリに
-記載しています。
+撤去は `terraform destroy` です。スナップショットとバケットは Terraform の state 外なので別途
+削除します。
+
+### その他のサービスクォータ
+
+| クォータ | コード | 必要 | 既定 |
+|---|---|---:|---:|
+| VPCs per Region | `L-F678F1CE` | 1 | 5 |
+| EC2-VPC Elastic IPs | `L-0263D0A3` | 1 | 5 |
+
+既存の VPC と Elastic IP もこれらに計上されるため、どちらかの既定値に近いアカウントでは、GPU とは
+無関係の理由で引き上げが必要になります。
 
 ---
 
-## 権限
+## 5. 費用
 
-上記のリソースを作成できる権限が必要です。実際には管理者ロール、または IAM ロールとポリシーを
-作成できるロールを意味します。`bin/preflight.sh` ではこれを検証できません。IAM に dry-run が
-無く、Permissions Boundary や Service Control Policy は事前に見えない形で apply 時に拒否し得る
-ためです。
+ワークショップを 1 回通すのに **6〜12 USD** 程度です。
 
-アカウントで Permissions Boundary を使用している場合、Terraform が作成するロールにもそれを
-適用する必要があります。これは申請ではなく `terraform/main.tf` の変更で対応するものなので、
-当日より前に把握しておく価値があります。
+| | |
+|---|---|
+| EKS クラスター 2 面と NAT ゲートウェイ | GPU ノードの有無にかかわらず約 0.35 USD/時 |
+| GPU ノード 1 台 | タイプにより 1.32〜2.45 USD/時。実行中のみ |
+
+この区別は環境を残す場合に効いてきます。クラスターは 1 日あたり数ドルです。GPU ノードを残した
+場合はそうならず、しかも残ることがあります。Karpenter は最後の Pod が消えてから 30 分ノードを
+保持し、これは warm 実行が依存している挙動です。
+
+```bash
+kubectl -n bench delete pods --all
+kubectl get nodeclaims        # 何も出力されないこと
+```
 
 ---
 
-## リージョン
+## 6. 所要時間
 
-既定は `us-west-2` で、`config.env` で設定します。GPU インスタンスタイプ、EKS 1.34、AWS Deep
-Learning Container のイメージが提供されていれば他のリージョンでも動作します。
-`bin/preflight.sh` は設定されたリージョンに対してこの 3 点を確認します。
+合計 **約 2 時間**で、大半は注意を向ける必要がありません。
+
+| 工程 | 所要時間 |
+|---|---|
+| `terraform apply` | 15〜20 分。大半は EKS コントロールプレーン 2 面 |
+| `snapshot/build-snapshot.sh` | 9 GB のイメージで 14 分。無人 |
+| `snapshot/stage-model.sh` | 数分。Hugging Face への接続速度による |
+| `bin/prep.sh` | 1 分未満 |
+| variant 1 つ | 1〜3 分。cold 実行ではノードのプロビジョニングが加わる |
+| 全 variant と後続 2 フェーズ | 約 25 分 |
+
+スナップショットの作成とモデルの配置は、数分かかるが見るものが無い 2 つです。イメージまたは
+モデルが変わらない限り再実行は不要です。
 
 ---
 
-## 費用と時間
+## ツールとリージョン
 
-合計で **6〜12 USD** 程度、**約 2 時間**です。時間の大半は無人で進みます。
+- `aws`（v2）、`kubectl`、`terraform`、`jq`、`python3`
+- モデル配置用の `hf` CLI: `pip install --upgrade 'huggingface_hub[cli]'`
+- 既定は `us-west-2`。`config.env` で設定します。GPU インスタンスタイプ、EKS 1.34、AWS Deep
+  Learning Container のイメージが提供されていれば他のリージョンでも動作します。
 
-EKS クラスター 2 面と NAT ゲートウェイは、GPU ノードが動いていなくても存在する間
-**約 0.35 USD/時**かかります。GPU ノードは約 2 USD/時で、実行中のみ存在します。したがって環境を
-一晩残す場合の費用は数ドルですが、GPU ノードを一晩残す場合はそうなりません。
+Kubernetes 1.34 以上が必要です。EKS 最適化 Bottlerocket NVIDIA AMI は 1.34 以降で NVIDIA
+ドライバ 580 を同梱し、ここで使う CUDA 13 のイメージはドライバ 580 を必要とします。
 
-当日実行ではなく事前に済ませるべき工程は EBS スナップショットの作成で、このイメージでは 14 分
-かかります。
+ステップ 3 には Bottlerocket 1.44.0 以上が必要です。SOCI の parallel pull/unpack はこのバージョンで
+追加されました。それより前では設定がエラーなく無視されるため、ステップ 3 はステップ 1 と同じものを
+計測します。
 
 ---
 
 ## 不要なもの
 
-- **レジストリの認証情報は不要です。** コンテナイメージは AWS Deep Learning Container で、
-  任意の AWS アカウントから読み取れます。
-- **Hugging Face のトークンは不要です。** モデルは Qwen2.5-1.5B-Instruct で、gated ではありません。
-- **Run:ai Model Streamer のライセンスは不要です。** Apache-2.0 で、コンテナイメージに既に
-  含まれています。
-- **カスタム AMI のビルドは不要です。** EKS 最適化 Bottlerocket NVIDIA AMI を公開されたまま
-  使用します。
-- **1 ノード分を超える GPU クォータは不要です。** variant を同時実行する場合を除きます。
-  ワークショップでは同時実行しません。
+- **レジストリの認証情報。** コンテナイメージは AWS Deep Learning Container で、任意の AWS
+  アカウントから読み取れます。
+- **Hugging Face のトークン。** 既定のモデル Qwen2.5-1.5B-Instruct は gated ではありません。
+- **Run:ai Model Streamer のライセンス。** Apache-2.0 で、コンテナイメージに既に含まれています。
+- **カスタム AMI。** EKS 最適化 Bottlerocket NVIDIA AMI を公開されたまま使用します。
+- **ノード 1 台分を超える GPU クォータ。** variant を同時実行する場合を除きます。本ワークショップ
+  では同時実行しません。
 
 ---
 
-## 複数人で実行する場合
+## 上記の確認
 
-1 つの AWS アカウントにこの環境を複数持つことはできますが、1 つの環境を共有することはできません。
-各自に別の `NAME_PREFIX`、別の clone、別の Terraform state を用意してください。
+```bash
+bin/preflight.sh
+```
 
-prefix は 2 箇所に設定する必要があり、両者を一致させてください。スクリプトが読むのは
-`config.env`、Terraform が読むのは `name_prefix` です。
+読み取り専用で、何も作成しません。ツール、認証情報、設定されたインスタンスタイプに対応する
+クォータ、既にそれを消費している GPU インスタンス、コンテナイメージとモデルリポジトリが読めるか、
+Kubernetes バージョン、Bottlerocket AMI のバージョン、設定されたタイプのインスタンスストアを
+報告します。必須項目が失敗した場合は非ゼロで終了します。
+
+確認できない範囲も出力します。上記の権限と GPU 容量です。
+
+`terraform apply` の後は `bin/verify_env.sh` が構築されたものを確認し、計測実行の前に
+`bin/check_capacity.sh` が容量を確認します。
+
+---
+
+## 1 つのアカウントで複数回実行する場合
+
+1 つのアカウントにこの環境を複数持つことはできますが、1 つの環境を共有することはできません。
+計測対象が cold な 1 個目の Pod だからです。`bin/reset.sh` は、これから実行する variant の
+ラベルが付いた Pod を削除し、続いて NodeClaim を削除します。後者はインスタンスの終了を意味します。
+1 クラスターを 2 人で使うと、実行途中の相手のノードを削除します。名前空間を分けても解決しません。
+各 variant はノードプールに pin されており、reset の対象がそのノードプールだからです。
+
+各環境に別の `NAME_PREFIX`、別の clone、別の Terraform state が必要です。prefix は 2 箇所に設定し、
+両者を一致させてください。
 
 ```bash
 # config.env
@@ -494,84 +546,16 @@ export NAME_PREFIX="br-startup-alice"
 terraform -chdir=terraform apply -var 'name_prefix=br-startup-alice'
 ```
 
-ほぼすべてがこの prefix から命名されます。2 面のクラスター、VPC、モデルバケット、IAM ポリシー、
-Karpenter のサブネット discovery タグ、スナップショットです。両者が食い違うと、`bin/prep.sh` は
-Terraform が作成していないクラスターを探すことになります。
+ほぼすべてがこれから命名されます。2 面のクラスター、VPC、モデルバケット、IAM ポリシー、Karpenter
+のサブネット discovery タグ、スナップショットです。両者が食い違うと、`bin/prep.sh` は Terraform が
+作成していないクラスターを探します。
 
-### 1 つの環境を共有できない理由
+環境 1 つあたり、VPC 1 つ、Elastic IP 1 つ、GPU クォータのノード 1 台分、および上記の費用が
+必要です。先に到達する上限は通常、VPC と Elastic IP の既定値 5 です。
 
-計測対象が cold な 1 個目の Pod なので、スクリプトは前回の実行が残したものを削除します。
-`bin/reset.sh` は、これから実行する variant のラベルが付いた Pod と、**NodeClaim** を削除します。
-NodeClaim の削除はインスタンスの終了を意味します。
+同時実行は同じ AZ の同じ GPU 容量を消費するため、セクション 3 の容量問題が起きやすくなります。
+実行時間をずらせば回避できます。
 
-```bash
-kubectl -n bench delete pod -l "workshop-variant=${variant}"
-kubectl delete nodeclaim -l "karpenter.sh/nodepool=${variant}"
-```
-
-1 クラスターを 2 人で使うと、実行途中の相手のノードを削除します。名前空間を分けても解決しません。
-各 variant はノードプールに pin されており、reset の対象がそのノードプールだからです。
-
-### 1 人増えるごとに必要なもの
-
-| 1 人あたり | 備考 |
-|---|---|
-| VPC 1 つ | 既定クォータはリージョンあたり 5。既存の VPC も数に含まれます |
-| Elastic IP 1 つ | NAT ゲートウェイ用。既定クォータも 5 |
-| G / VT の 32 vCPU | 同時実行する場合、各自が同時にノードを必要とします |
-| 6〜12 USD 程度 | 費用は共有されません |
-
-人数に対して確認すべきは GPU クォータです。4 人が同時実行するなら 32 ではなく 128 vCPU が
-必要です。
-
-### クォータではない制約
-
-同時実行は同じ AZ の同じ GPU 容量を消費します。容量はインスタンスタイプと AZ の組み合わせごとで、
-ある AZ が 1 つのタイプだけ不足していることもあります。Karpenter が拒否されると、その offering を
-3 分間 unavailable に保持し、Pod はノードが要求される前に TTL を待ちます。この待ち時間は、説明する
-エラーを伴わずに計測に入ります。
-
-軽減する方法は 2 つあります。全員が開始前に `bin/check_capacity.sh` を実行し、全 AZ で容量のある
-インスタンスタイプを合意することです。あるいは同時に始めず実行時間をずらすことです。後者は
-レジストリへの同時アクセスも避けられます。
-
-### 共有できるもの
-
-スナップショットとモデルバケットは作成後は読み取り専用なので、1 人が作成して他の人がそれを指す
-ことができます。他の各人が 14 分のスナップショット作成を省けます。
-
-```bash
-# config.env に指定
-export MODEL_BUCKET="<最初の人が作成したバケット>"
-# スナップショット ID は results/snapshot-id.txt、または
-# SSM パラメータ /<その人の prefix>/image-cache-snapshot-id から
-```
-
-同一アカウント内であればクロスアカウントのポリシーは不要です。読み取り側のロールには対象バケットへの
-`s3:GetObject` が必要です。これは `${NAME_PREFIX}-model-weights-read` が同じ prefix で作成した
-バケットに対して付与しているものなので、共有する場合は他の prefix のロールにアクセスを許可するか、
-各自でモデルを配置することになります。
-
----
-
-## 当日
-
-GPU の容量はインスタンスタイプと AZ の組み合わせごとに変動し、数分単位で変わります。選択した
-タイプの容量が無い AZ があっても Karpenter は別の AZ を使えるため実行は止まりませんが、計測に
-待ち時間が加わります。開始直前に確認する価値があります。
-
-```bash
-bin/check_capacity.sh
-```
-
-利用可能な容量を報告する API が存在しないため、各サブネットに 1 台起動して即座に終了させます。
-失敗した場合、EC2 のエラーにはその時点で要求を満たせる AZ が示されます。
-
-最後の実行の後、GPU ノードが残っていないか確認してください。フェーズ 3 は Pod が動いている状態で
-終わり、Karpenter は最後の Pod が消えてから 30 分ノードを保持します。これは warm 実行に必要なため
-意図的な設定ですが、セッション終了後に GPU インスタンスが残る原因になります。
-
-```bash
-kubectl -n bench delete pods --all
-kubectl get nodeclaims        # 何も出力されないこと
-```
+スナップショットとモデルバケットは作成後は読み取り専用で共有できます。他の各人がスナップショット
+作成を省けます。同一アカウント内であればクロスアカウントのポリシーは不要ですが、読み取り側の
+ロールには他の prefix のバケットへの `s3:GetObject` が必要です。
