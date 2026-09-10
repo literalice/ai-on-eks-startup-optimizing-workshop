@@ -99,20 +99,10 @@ This needs the VPC to exist, so it runs after Terraform rather than before.
 
 ---
 
-## 4. Permissions
+## 4. Resources created, and the permissions for them
 
-An administrative role, or one that can create the resources listed below, including IAM roles
-and policies.
-
-This cannot be verified in advance. IAM has no dry-run, and a permissions boundary or a Service
-Control Policy denies at apply time without being visible beforehand. If the account uses a
-permissions boundary, the roles Terraform creates need it applied, which is a change to
-`terraform/main.tf`.
-
-### What gets created
-
-All of it in one region, in a VPC of its own. Nothing is placed in an existing VPC and nothing
-existing is modified.
+Terraform creates the following, all in one region and in a VPC of its own. Nothing is placed in
+an existing VPC and nothing existing is modified.
 
 | | |
 |---|---|
@@ -127,6 +117,9 @@ existing is modified.
 
 Teardown is `terraform destroy`. The snapshot and the bucket are outside Terraform's state and
 are removed separately.
+
+The account needs permission to create these, including IAM roles and policies, or
+administrative permission.
 
 ### Other service quotas
 
@@ -366,18 +359,10 @@ bin/check_capacity.sh
 
 ---
 
-## 4. 権限
+## 4. 作成されるリソースと、そのための権限
 
-管理者ロール、または後述のリソースを作成できるロールです。IAM ロールとポリシーの作成を含みます。
-
-これは事前に検証できません。IAM に dry-run が無く、Permissions Boundary や Service Control Policy
-は事前に見えない形で apply 時に拒否します。アカウントで Permissions Boundary を使用している場合、
-Terraform が作成するロールにもそれを適用する必要があり、これは `terraform/main.tf` の変更になります。
-
-### 作成されるもの
-
-すべて 1 リージョン内の専用 VPC に作成します。既存の VPC には何も配置せず、既存のリソースを変更
-しません。
+Terraform は以下を、すべて 1 リージョン内の専用 VPC に作成します。既存の VPC には何も配置せず、
+既存のリソースを変更しません。
 
 | | |
 |---|---|
@@ -392,6 +377,8 @@ Terraform が作成するロールにもそれを適用する必要があり、�
 
 撤去は `terraform destroy` です。スナップショットとバケットは Terraform の state 外なので別途
 削除します。
+
+これらを作成できる権限（IAM ロールとポリシーの作成を含む）、または管理権限が必要です。
 
 ### その他のサービスクォータ
 

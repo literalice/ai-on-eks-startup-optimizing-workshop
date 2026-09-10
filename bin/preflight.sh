@@ -10,8 +10,8 @@
 # Exit status is 0 when every required check passed. Warnings do not fail the run: they are
 # for things that would only affect part of the workshop.
 #
-# What this cannot check is listed at the end. Permission to create IAM roles is the main
-# one, because IAM has no dry-run and the only way to be certain is to run terraform apply.
+# What this cannot check is listed at the end: permission to create the resources, and GPU
+# capacity.
 
 set -uo pipefail
 
@@ -264,15 +264,11 @@ fi
 head2 "What this cannot check"
 
 cat <<'LIMITS'
-  - Permission to create IAM roles and policies. IAM has no dry-run, and a permissions
-    boundary or an SCP can deny at apply time without being visible beforehand. Terraform
-    creates roles for both clusters, the Karpenter controller, the nodes, and one for the
-    workshop's service account.
-  - Permission to create EKS clusters, a VPC with a NAT gateway, an S3 bucket, EBS
-    snapshots and launch templates.
-  - GPU capacity. That varies by instance type and Availability Zone from minute to minute,
-    and it can only be tested by launching. Run bin/check_capacity.sh after terraform has
-    created the VPC, and again shortly before the session.
+  - Permission to create the resources: two EKS clusters, a VPC with a NAT gateway, IAM
+    roles and policies, an S3 bucket, EBS snapshots and launch templates. Only terraform
+    apply establishes this.
+  - GPU capacity, which varies by instance type and Availability Zone and can only be
+    tested by launching. Run bin/check_capacity.sh once the VPC exists.
 LIMITS
 
 ################################################################################
