@@ -125,23 +125,36 @@ check_quota() {
   fi
 }
 
-# The quota depends on the instance family, not just on the vCPU count. G, GR and VT types
-# count against one quota and P types against a different one, and both are measured in vCPU.
-# Picking a different GPU type therefore changes which quota to check as well as how much of
-# it is needed.
+# The quota depends on the instance family, not just on the vCPU count, and both G and P are
+# counted in vCPU rather than in instances.
+#
+# P types are refused. Nothing in this workshop needs one -- the model is 1.5B parameters and
+# fits in 24 GB -- and they cost several times a G type, so a session that reached for one
+# would leave the stated cost behind without gaining a measurement. Set
+# ALLOW_LARGE_GPU_FAMILY=1 to override, if you have a reason.
 case "${GPU_INSTANCE_TYPE}" in
-  g*)  GPU_QUOTA_CODE="L-DB2E81BA"; GPU_QUOTA_NAME="Running On-Demand G and VT instances (vCPU)" ;;
-  p*)  GPU_QUOTA_CODE="L-417A185B"; GPU_QUOTA_NAME="Running On-Demand P instances (vCPU)" ;;
-  *)   GPU_QUOTA_CODE=""; GPU_QUOTA_NAME="" ;;
+  g*)
+    check_quota ec2 L-DB2E81BA "${GPU_VCPUS}" "Running On-Demand G and VT instances (vCPU)"
+    ;;
+  p*)
+    if [[ "${ALLOW_LARGE_GPU_FAMILY:-}" == "1" ]]; then
+      warn "${GPU_INSTANCE_TYPE} is a P type, allowed by ALLOW_LARGE_GPU_FAMILY=1"
+      check_quota ec2 L-417A185B "${GPU_VCPUS}" "Running On-Demand P instances (vCPU)"
+    else
+      fail "${GPU_INSTANCE_TYPE} is a P type. This workshop is built around G types."
+      note "The model is 1.5B parameters and fits in 24 GB, so a P type buys no measurement"
+      note "and costs several times more per hour. It also counts against a different quota"
+      note "(L-417A185B rather than L-DB2E81BA), so a P type in an account provisioned for"
+      note "G types will not launch at all."
+      note "Pick a G type from the table in PREREQUISITES.md, or set ALLOW_LARGE_GPU_FAMILY=1."
+    fi
+    ;;
+  *)
+    warn "no known On-Demand quota for the family of ${GPU_INSTANCE_TYPE}; check it by hand"
+    note "Service Quotas, EC2, the 'Running On-Demand ...' entry for that family. It is"
+    note "counted in vCPU, so the requirement is ${GPU_VCPUS}."
+    ;;
 esac
-
-if [[ -n "${GPU_QUOTA_CODE}" ]]; then
-  check_quota ec2 "${GPU_QUOTA_CODE}" "${GPU_VCPUS}" "${GPU_QUOTA_NAME}"
-else
-  warn "no known On-Demand quota for the family of ${GPU_INSTANCE_TYPE}; check it by hand"
-  note "Service Quotas, EC2, the 'Running On-Demand ...' entry for that family. It is"
-  note "counted in vCPU, so the requirement is ${GPU_VCPUS}."
-fi
 
 check_quota vpc L-F678F1CE 1 "VPCs per Region"
 check_quota ec2 L-0263D0A3 1 "EC2-VPC Elastic IPs (the NAT gateway uses one)"

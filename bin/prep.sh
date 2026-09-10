@@ -53,6 +53,36 @@ aws eks update-kubeconfig --region "${REGION}" --name "${KARPENTER_CLUSTER}" --a
 aws eks update-kubeconfig --region "${REGION}" --name "${AUTOMODE_CLUSTER}" --alias "${AUTOMODE_CLUSTER}" >/dev/null
 
 ################################################################################
+# Refuse a P-family instance type.
+#
+# This is a cost guard, not a technical limit. The model is 1.5B parameters and fits in 24 GB,
+# so a P type measures the same thing as a G type at several times the hourly rate --
+# p5.4xlarge is about 6.88 USD/hour against 2.45 for the default gr6.8xlarge, and
+# p4d.24xlarge about 21.96. The stated 6-12 USD for the workshop assumes a G type.
+#
+# It is checked here because this is what writes the instance type into the node pools, so
+# nothing can run on a type this did not apply.
+################################################################################
+case "${GPU_INSTANCE_TYPE}" in
+  p*)
+    if [[ "${ALLOW_LARGE_GPU_FAMILY:-}" != "1" ]]; then
+      echo "GPU_INSTANCE_TYPE=${GPU_INSTANCE_TYPE} is a P type. This workshop uses G types." >&2
+      echo "" >&2
+      echo "Nothing here needs one. The model fits in 24 GB, so a P type produces the same" >&2
+      echo "measurement and costs several times as much per hour. P types also count against" >&2
+      echo "a different service quota, so one may not launch at all in an account set up for" >&2
+      echo "this workshop." >&2
+      echo "" >&2
+      echo "Pick a G type with local NVMe -- see the table in PREREQUISITES.md -- or set" >&2
+      echo "ALLOW_LARGE_GPU_FAMILY=1 if you have a reason." >&2
+      exit 2
+    fi
+    echo "==> WARNING: ${GPU_INSTANCE_TYPE} is a P type, allowed by ALLOW_LARGE_GPU_FAMILY=1"
+    echo "    The cost figures in the README assume a G type."
+    ;;
+esac
+
+################################################################################
 # Assert the Bottlerocket AMI is new enough for SOCI.
 #
 # SOCI parallel pull/unpack landed in Bottlerocket 1.44.0. On an earlier version the

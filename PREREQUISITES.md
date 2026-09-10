@@ -35,8 +35,7 @@ If the account already runs GPU instances in the same region, they consume the s
 
 ### If you use a different instance type
 
-Set `GPU_INSTANCE_TYPE` in `config.env`. Two constraints apply, and the quota to check changes
-with the family:
+Set `GPU_INSTANCE_TYPE` in `config.env`. Two constraints apply:
 
 **The type needs local NVMe instance store.** Steps 3 and 4 place container storage on it. On a
 type without instance store, both of those steps measure the same thing as step 1 and the
@@ -64,16 +63,36 @@ Single-GPU types with instance store, from `describe-instance-types`:
 | `g6e.8xlarge` | 32 | L40S 48 GB | 2× 450 GB | 32 |
 | `g4dn.4xlarge` | 16 | T4 16 GB | 1× 225 GB | 16 |
 
-All of the above count against **G and VT**, quota `L-DB2E81BA`. A `p` type such as
-`p5.4xlarge` counts against **Running On-Demand P instances**, quota `L-417A185B`, which is a
-separate limit — an account can have plenty of one and none of the other.
+All of the above count against **G and VT**, quota `L-DB2E81BA`, so switching between them does
+not need a different quota approved — only enough of the same one.
 
-`bin/preflight.sh` picks the quota code from the family of whatever is configured and compares
-it against that type's vCPU count, so run it after changing the type rather than reading this
-table.
+`bin/preflight.sh` compares the live quota against the configured type's vCPU count, so run it
+after changing the type rather than reading this table.
 
 The GPU memory column matters only if you raise `MODEL_HF_REPO` to a larger model. The default
 model is 2.9 GB and fits on any of these.
+
+### P types are not used
+
+`bin/prep.sh` and `bin/preflight.sh` both refuse a `p` type. This is a cost guard rather than a
+technical limit, and there are three reasons for it.
+
+The model is 1.5B parameters and fits in 24 GB, so a P type produces the same measurement. It
+costs several times as much while doing so:
+
+| Type | On-Demand, `us-west-2` |
+|---|---:|
+| `g6.4xlarge` | 1.32 USD/hour |
+| `gr6.8xlarge` (default) | 2.45 USD/hour |
+| `p5.4xlarge` | 6.88 USD/hour |
+| `p4d.24xlarge` | 21.96 USD/hour |
+
+And P types count against a separate quota, `L-417A185B` — an account prepared for this
+workshop by raising the G quota would not launch one at all, which surfaces as a variant that
+stays Pending.
+
+If you have a reason, `ALLOW_LARGE_GPU_FAMILY=1` overrides both checks. The cost figures below
+assume a G type.
 
 ---
 
@@ -310,8 +329,7 @@ aws service-quotas get-service-quota --region us-west-2 \
 
 ### 別のインスタンスタイプを使う場合
 
-`config.env` の `GPU_INSTANCE_TYPE` を設定します。制約が 2 つあり、確認すべきクォータもファミリー
-によって変わります。
+`config.env` の `GPU_INSTANCE_TYPE` を設定します。制約が 2 つあります。
 
 **ローカル NVMe インスタンスストアが必要です。** ステップ 3 と 4 はそこにコンテナストレージを
 配置します。インスタンスストアを持たないタイプでは、この 2 つのステップがステップ 1 と同じものを
@@ -338,15 +356,36 @@ aws service-quotas get-service-quota --region us-west-2 \
 | `g6e.8xlarge` | 32 | L40S 48 GB | 450 GB × 2 | 32 |
 | `g4dn.4xlarge` | 16 | T4 16 GB | 225 GB × 1 | 16 |
 
-上記はすべて **G and VT**（クォータ `L-DB2E81BA`）に計上されます。`p5.4xlarge` のような `p` 系は
-**Running On-Demand P instances**（クォータ `L-417A185B`）で、これは別枠です。一方に十分な枠が
-あっても他方はゼロ、ということが起こり得ます。
+上記はすべて **G and VT**（クォータ `L-DB2E81BA`）に計上されます。この中で切り替える場合、別の
+クォータの承認は不要で、同じクォータの枠が足りていれば済みます。
 
-`bin/preflight.sh` は設定されたタイプのファミリーからクォータコードを選び、そのタイプの vCPU 数と
-比較します。タイプを変更した場合は、この表を読むのではなくスクリプトを実行してください。
+`bin/preflight.sh` は設定されたタイプの vCPU 数と実際のクォータを比較します。タイプを変更した
+場合は、この表を読むのではなくスクリプトを実行してください。
 
 GPU メモリの列が問題になるのは、`MODEL_HF_REPO` をより大きいモデルに変更する場合だけです。既定の
 モデルは 2.9 GB で、上記のいずれにも収まります。
+
+### P 系は使いません
+
+`bin/prep.sh` と `bin/preflight.sh` はどちらも `p` 系を拒否します。これは技術的な制限ではなく
+コストのガードで、理由は 3 つあります。
+
+モデルは 1.5B パラメータで 24 GB に収まるため、P 系でも計測結果は同じです。そのうえで数倍の費用が
+かかります。
+
+| タイプ | On-Demand、`us-west-2` |
+|---|---:|
+| `g6.4xlarge` | 1.32 USD/時 |
+| `gr6.8xlarge`（既定） | 2.45 USD/時 |
+| `p5.4xlarge` | 6.88 USD/時 |
+| `p4d.24xlarge` | 21.96 USD/時 |
+
+そして P 系は別枠のクォータ `L-417A185B` に計上されます。G のクォータを引き上げて本ワークショップに
+備えたアカウントでは、P 系はそもそも起動しません。これは variant が Pending のままになる形で
+現れます。
+
+理由がある場合は `ALLOW_LARGE_GPU_FAMILY=1` で両方のチェックを上書きできます。以下の費用の記載は
+G 系を前提としています。
 
 ---
 
