@@ -6,8 +6,8 @@ Every mechanism this workshop measures is an `EC2NodeClass` and a `NodePool`. Ne
 new cluster. This document gives the commands and the YAML directly, without the scripts in
 `bin/`, so that each step can be run and read one at a time on a cluster that already exists.
 
-The scripts in `bin/` do the same things with the measurement harness attached. Use them if you
-want the stage breakdown; use this document if you want to apply the settings.
+The scripts in `bin/` do the same things and also compute the stage breakdown. Use them if you
+want the breakdown. Use this document to apply the settings.
 
 ---
 
@@ -66,7 +66,7 @@ kubectl get pods -A -o wide --field-selector spec.nodeName=<the new node>
 
 The first command lists pods that tolerate any taint. Those are usually DaemonSets, which is
 expected: they will run on the new nodes as they do on every node. A workload pod in that list is
-worth looking at before you continue.
+something to check before you continue.
 
 ### Values used throughout
 
@@ -84,7 +84,7 @@ export PREFIX=br-test                # prefixes the NodePool and EC2NodeClass na
 
 ## Step 1. A baseline node class, with no optimization
 
-This is Bottlerocket as it ships. It is worth applying first, because the later steps only mean
+This is Bottlerocket as it ships. Apply it first, because the later steps only mean
 something against a figure from this one.
 
 ```yaml
@@ -145,7 +145,6 @@ spec:
           effect: NoSchedule
         - key: nvidia.com/gpu
           effect: NoSchedule
-      expireAfter: 4h
       requirements:
         - key: kubernetes.io/os
           operator: In
@@ -225,7 +224,7 @@ spec:
           nvidia.com/gpu: 1
 ```
 
-### Reading the time without the harness
+### Reading the time with kubectl alone
 
 The stages are timestamps Kubernetes already records.
 
@@ -299,7 +298,7 @@ metadata:
 spec:
   disruption:
     consolidationPolicy: WhenEmpty
-    consolidateAfter: 1m              # short: this node has one job
+    consolidateAfter: 30m             # the volume has to outlive the snapshot, below
   template:
     metadata:
       labels:
@@ -317,7 +316,6 @@ spec:
           effect: NoSchedule
         - key: nvidia.com/gpu
           effect: NoSchedule
-      expireAfter: 1h
       requirements:
         - key: kubernetes.io/os
           operator: In
@@ -358,7 +356,7 @@ spec:
   containers:
     - name: pull
       image: <your GPU image>          # more than one? add a container per image
-      command: ["sleep", "600"]
+      command: ["sleep", "3600"]
 ```
 
 ```bash
@@ -438,7 +436,7 @@ snapshot's encryption, and the snapshot came from an encrypted volume.
 **Do not also set `instanceStorePolicy: RAID0` here.** That is step 3, and the two cannot be
 combined. Step 3 covers why.
 
-### Confirming it worked, without the harness
+### Confirming it worked, with kubectl and aws alone
 
 ```bash
 # the volume the node booted from should carry your snapshot ID
@@ -555,7 +553,7 @@ node class measures the same thing as step 1. Check before believing a result:
 kubectl get nodes -l br-test=soci -o jsonpath='{.items[0].status.nodeInfo.osImage}'
 ```
 
-### Confirming it worked, without the harness
+### Confirming it worked, with kubectl alone
 
 Bottlerocket has no shell, so there is no logging in to look. Two things can be read from
 outside.
@@ -591,17 +589,16 @@ The node survives because `consolidateAfter` is 30m. Compare start-to-Ready with
 Whatever the difference is, that is the part of your startup cost that is incurred once per node
 rather than once per pod. If most of your pods land on nodes that are already running, the three
 mechanisms above affect a small share of your total startup time, and node capacity policy
-affects more of it. That is the question worth taking away: what fraction of your pods land on
-new nodes?
+affects more of it. The thing to find out is what fraction of your pods land on new nodes.
 
 ---
 
 ## Step 5. Model loading, for an inference workload
 
 Once the image stops being the largest stage, the weights are next. Three variations, in the
-order they are worth trying.
+order to try them.
 
-### Weights in an init container, which is the obvious version and has a defect
+### Weights in an init container, and the defect in it
 
 ```yaml
   initContainers:
@@ -635,7 +632,7 @@ the image smaller and can still make start-to-Ready longer.
 nothing is installed and no licence is needed. This changes the loader only, with the same bytes
 on the same disk.
 
-### The streamer reading S3 directly, which removes the copy
+### The streamer reading S3 directly, with no copy step
 
 ```yaml
       # no initContainers
@@ -647,7 +644,7 @@ on the same disk.
             --model-loader-extra-config '{"concurrency":32}'
 ```
 
-### What to read in the log, and what it usually says
+### What the log says
 
 ```bash
 kubectl logs <pod> | grep -E "Loading weights took|Model loading took|torch.compile took|init engine"
@@ -680,7 +677,7 @@ aws eks create-pod-identity-association --region "$REGION" --cluster-name "$CLUS
   --namespace default --service-account <sa> --role-arn <role that can read the bucket>
 ```
 
-The hop limit is worth keeping. It is what stops a pod from using the node's permissions.
+Keep the hop limit. It is what stops a pod from using the node's permissions.
 
 ---
 
@@ -768,8 +765,8 @@ kubectl get nodeclaims
 クラスターを必要としません。この文書では `bin/` のスクリプトを使わず、コマンドと YAML を直接
 示します。既存クラスター上で 1 ステップずつ実行し、内容を確認できる形にしています。
 
-`bin/` のスクリプトは同じことを計測ハーネス付きで行います。段階ごとの内訳が必要ならスクリプトを、
-設定の適用が目的ならこの文書を使ってください。
+`bin/` のスクリプトは同じことを行い、さらに段階ごとの内訳を算出します。内訳が必要ならスクリプトを、
+設定を適用したいだけならこの文書を使ってください。
 
 ---
 
@@ -828,7 +825,7 @@ kubectl get pods -A -o wide --field-selector spec.nodeName=<新しいノード>
 
 1 つ目のコマンドは、任意の taint を tolerate する Pod を列挙します。通常は DaemonSet で、これは
 想定どおりです。他の全ノードと同様に新しいノードでも動きます。この一覧にワークロードの Pod が
-含まれる場合は、続ける前に確認する価値があります。
+含まれる場合は、続ける前に中身を確認してください。
 
 ### 以下で使う値
 
@@ -847,7 +844,7 @@ export PREFIX=br-test                # NodePool と EC2NodeClass 名の prefix
 ## ステップ 1. 最適化なしのベースライン node class
 
 Bottlerocket をそのまま使う構成です。以降のステップはこの数字と比べて初めて意味を持つので、
-最初に適用する価値があります。
+最初に適用してください。
 
 ```yaml
 apiVersion: karpenter.k8s.aws/v1
@@ -907,7 +904,6 @@ spec:
           effect: NoSchedule
         - key: nvidia.com/gpu
           effect: NoSchedule
-      expireAfter: 4h
       requirements:
         - key: kubernetes.io/os
           operator: In
@@ -919,8 +915,6 @@ spec:
           operator: In
           values: ["on-demand"]
 ```
-
-3 つのフィールドは立ち止まる価値があります。
 
 `alias: bottlerocket@latest` は、GPU インスタンスタイプに対して `aws-k8s-<version>-nvidia`
 variant を解決します。この AMI には NVIDIA ドライバ、container toolkit、Kubernetes device
@@ -989,7 +983,7 @@ spec:
           nvidia.com/gpu: 1
 ```
 
-### ハーネスなしで時間を読む
+### kubectl だけで所要時間を読む
 
 各段階は Kubernetes が既に記録しているタイムスタンプです。
 
@@ -1062,7 +1056,7 @@ metadata:
 spec:
   disruption:
     consolidationPolicy: WhenEmpty
-    consolidateAfter: 1m              # このノードの仕事は 1 つなので短く
+    consolidateAfter: 30m             # 後述のスナップショットが終わるまでボリュームを残す
   template:
     metadata:
       labels:
@@ -1080,7 +1074,6 @@ spec:
           effect: NoSchedule
         - key: nvidia.com/gpu
           effect: NoSchedule
-      expireAfter: 1h
       requirements:
         - key: kubernetes.io/os
           operator: In
@@ -1120,7 +1113,7 @@ spec:
   containers:
     - name: pull
       image: <GPU イメージ>              # 複数ある場合はイメージごとに container を追加
-      command: ["sleep", "600"]
+      command: ["sleep", "3600"]
 ```
 
 ```bash
@@ -1197,7 +1190,7 @@ kubectl delete ec2nodeclass br-test-builder
 **ここに `instanceStorePolicy: RAID0` を併せて設定しないでください。** それはステップ 3 で、
 2 つは併用できません。理由はステップ 3 に書いています。
 
-### ハーネスなしで効果を確認する
+### kubectl と aws だけで効果を確認する
 
 ```bash
 # ノードが起動したボリュームに、作成したスナップショット ID が付いているはず
@@ -1215,7 +1208,7 @@ kubectl get events --field-selector involvedObject.name=br-test-snapshot | grep 
 いないことを意味します。
 
 この機構のコストは、イメージが変わるたびにスナップショットを作り直す必要があることです。改善幅は
-ゼロと比べるのではなく、このコストと比べてください。
+このコストと比べて判断してください。
 
 ---
 
@@ -1312,7 +1305,7 @@ SOCI の parallel pull/unpack は Bottlerocket 1.44.0 で追加されました�
 kubectl get nodes -l br-test=soci -o jsonpath='{.items[0].status.nodeInfo.osImage}'
 ```
 
-### ハーネスなしで効果を確認する
+### kubectl だけで効果を確認する
 
 Bottlerocket にシェルは無いので、ログインして見ることはできません。外から読めるものが 2 つあります。
 
@@ -1345,8 +1338,8 @@ kubectl apply -f pod.yaml            # 同じ Pod spec
 
 その差が、起動コストのうち Pod ごとではなく**ノード 1 台につき 1 回**発生している分です。Pod の
 大半がすでに動いているノードに載るなら、上記 3 つの機構が影響するのは起動時間全体のごく一部で、
-ノードのキャパシティ方針の方が大きく影響します。持ち帰る価値のある問いはこれです。自社の Pod の
-何割が新しいノードに載っているか。
+ノードのキャパシティ方針の方が大きく影響します。確認すべきことは、自社の Pod の何割が新しい
+ノードに載っているかです。
 
 ---
 
@@ -1354,7 +1347,7 @@ kubectl apply -f pod.yaml            # 同じ Pod spec
 
 イメージが最大の段階でなくなると、次はウェイトです。試す価値のある順に 3 通りです。
 
-### init コンテナでウェイトを取得する。これは自然な実装だが欠点がある
+### init コンテナでウェイトを取得する場合の欠点
 
 ```yaml
   initContainers:
@@ -1387,7 +1380,7 @@ kubelet は init イメージを pull し、init コンテナを完了まで実�
 `runai-streamer` は AWS vLLM Deep Learning Container に既に含まれており Apache-2.0 なので、
 インストールもライセンスも不要です。これはローダーだけを変え、バイト列とディスクは同じです。
 
-### streamer が S3 を直接読む。コピー工程が消える
+### streamer が S3 を直接読む（コピー工程なし）
 
 ```yaml
       # initContainers なし
@@ -1399,7 +1392,7 @@ kubelet は init イメージを pull し、init コンテナを完了まで実�
             --model-loader-extra-config '{"concurrency":32}'
 ```
 
-### ログで何を読むか、そして通常何が書かれているか
+### ログに何が出るか
 
 ```bash
 kubectl logs <pod> | grep -E "Loading weights took|Model loading took|torch.compile took|init engine"
@@ -1430,7 +1423,7 @@ aws eks create-pod-identity-association --region "$REGION" --cluster-name "$CLUS
   --namespace default --service-account <sa> --role-arn <バケットを読めるロール>
 ```
 
-hop limit は維持する価値があります。Pod がノードの権限を使うことを防いでいるのがこれです。
+hop limit はそのままにしてください。これが Pod にノードの権限を使わせない仕組みです。
 
 ---
 
@@ -1462,8 +1455,8 @@ kubectl logs <pod> | grep "Using cache directory"
 が同じルート配下にモデルをキャッシュするため、ルート全体をマウントするとウェイトも永続化されます。
 2 個目の Pod は S3 の読み込みもスキップし、短縮分をコンパイルに帰属させられなくなります。
 
-どちらが起きたかは、計測時間ではなくログで確認してください。コンパイル時間が短いのは、コンパイル
-設定が変わった場合にも同じように見えます。
+どちらが起きたかはログで確認してください。コンパイル時間が短いという結果は、コンパイル設定が
+変わった場合にも同じように見えます。
 
 ```bash
 # ミス: コンパイルして保存した

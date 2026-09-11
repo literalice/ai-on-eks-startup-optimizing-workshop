@@ -63,7 +63,6 @@ spec:
       taints:
         - key: nvidia.com/gpu
           effect: NoSchedule
-      expireAfter: 4h
       requirements:
         - key: eks.amazonaws.com/instance-family
           operator: In
