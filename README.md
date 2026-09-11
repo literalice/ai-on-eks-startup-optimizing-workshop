@@ -567,6 +567,7 @@ bin/
   preflight.sh                    account prerequisites, before terraform
   verify_env.sh                   what terraform built, before the first variant
   check_capacity.sh               GPU capacity, before a measurement run
+  gpu_images.py                   which images the cluster's GPU pods run
   prep.sh                         render, apply, check versions
   discover.sh                     finds the node role and the bucket (sourced)
   bench.sh                        run one variant, collect, compute
@@ -1169,6 +1170,7 @@ bin/
   preflight.sh                    アカウントの前提条件。terraform の前
   verify_env.sh                   terraform が構築したもの。最初の variant の前
   check_capacity.sh               GPU 容量。計測実行の前
+  gpu_images.py                   クラスターの GPU Pod が動かしているイメージ
   prep.sh                         展開、適用、バージョン確認
   discover.sh                     ノードロールとバケットを特定（source される）
   bench.sh                        1 つの variant を実行し、収集・算出

@@ -17,11 +17,47 @@ not contact the registry.
 ## Part A — build the snapshot
 
 Use a dedicated builder instance. This is the method to take back to your own environment,
-so it is the one the workshop runs:
+so it is the one the workshop runs.
+
+First, which image. The snapshot has to hold the image the pods will actually run: kubelet
+compares the reference, so a different tag means a full pull and the figures read as the
+mechanism having no effect. Ask the cluster rather than recalling it:
 
 ```bash
-IMAGE="<your workload image>" snapshot/build-snapshot.sh    # takes 10-20 minutes
+bin/gpu_images.py
 ```
+
+```
+==> images running in br-startup-karpenter, from containers requesting a GPU resource
+
+    pods  image                                                                                     namespaces
+       1  763104351884.dkr.ecr.us-west-2.amazonaws.com/vllm:0.22.0-gpu-py312-cu130-ubuntu22.04-ec2  bench
+
+==> one candidate. To pre-bake it:
+      IMAGE="763104351884.dkr.ecr.us-west-2.amazonaws.com/vllm:0.22.0-gpu-py312-cu130-ubuntu22.04-ec2" snapshot/build-snapshot.sh
+```
+
+It lists the images of containers that request a GPU resource. If nothing does, it falls back to
+the pods running on nodes that advertise GPU capacity, and says which of the two produced the
+list.
+
+Then build it. With no `IMAGE`, the script runs the same discovery and prints what it chose:
+
+```bash
+snapshot/build-snapshot.sh                                  # takes 10-20 minutes
+IMAGE="<one of the images above>" snapshot/build-snapshot.sh # or name it
+```
+
+```
+==> which image to bake
+    763104351884.dkr.ecr.us-west-2.amazonaws.com/vllm:0.22.0-gpu-py312-cu130-ubuntu22.04-ec2
+    from the only image the cluster's GPU pods run
+```
+
+It resolves `IMAGE`, then the cluster, then `WORKLOAD_IMAGE` in `config.env`. The cluster comes
+before `config.env` because `config.env` holds this workshop's image, which is the wrong answer
+on a cluster that was running something before the workshop arrived. If the cluster runs several
+GPU images it prints them and stops, rather than picking one.
 
 The script wraps [`aws-samples/bottlerocket-images-cache`][cache], which:
 
@@ -205,9 +241,44 @@ Bottlerocket はコンテナイメージをデータボリュームに保存し�
 専用のビルダーインスタンスを使います。自身の環境に持ち帰るのはこの方式なので、
 ワークショップでもこちらを実行します。
 
+まずどのイメージかを決めます。スナップショットには、Pod が実際に動かすイメージが入っていなければ
+なりません。kubelet は参照を比較するため、タグが違えば pull が全量発生し、数字はこの機構に効果が
+ないように見えます。記憶に頼らず、クラスターに尋ねます。
+
 ```bash
-IMAGE="<対象のワークロードイメージ>" snapshot/build-snapshot.sh    # 10〜20 分
+bin/gpu_images.py
 ```
+
+```
+==> images running in br-startup-karpenter, from containers requesting a GPU resource
+
+    pods  image                                                                                     namespaces
+       1  763104351884.dkr.ecr.us-west-2.amazonaws.com/vllm:0.22.0-gpu-py312-cu130-ubuntu22.04-ec2  bench
+
+==> one candidate. To pre-bake it:
+      IMAGE="763104351884.dkr.ecr.us-west-2.amazonaws.com/vllm:0.22.0-gpu-py312-cu130-ubuntu22.04-ec2" snapshot/build-snapshot.sh
+```
+
+GPU リソースを要求しているコンテナのイメージを列挙します。要求しているものが無い場合は、GPU 容量を
+広告しているノード上で動いている Pod にフォールバックし、どちらで列挙したかを出力します。
+
+そのうえで作成します。`IMAGE` を渡さない場合、スクリプトは同じ探索を行い、何を選んだかを出力します。
+
+```bash
+snapshot/build-snapshot.sh                                    # 10〜20 分
+IMAGE="<上記のいずれか>" snapshot/build-snapshot.sh            # 直接指定する場合
+```
+
+```
+==> which image to bake
+    763104351884.dkr.ecr.us-west-2.amazonaws.com/vllm:0.22.0-gpu-py312-cu130-ubuntu22.04-ec2
+    from the only image the cluster's GPU pods run
+```
+
+解決順は `IMAGE`、クラスター、`config.env` の `WORKLOAD_IMAGE` です。クラスターが `config.env` より
+先なのは、`config.env` にはこのワークショップのイメージが入っており、ワークショップ以前から何かが
+動いていたクラスターでは正しい答えにならないためです。GPU イメージが複数ある場合は、一覧を出して
+停止します。勝手に 1 つを選ぶことはしません。
 
 このスクリプトは [`aws-samples/bottlerocket-images-cache`][cache] のラッパーで、次を行います。
 

@@ -172,6 +172,25 @@ already runs GPU workloads takes the `br-test` one as well as the GPU one.
 
 ### A pod to measure with
 
+Use an image your GPU workloads already run, so the figures are about your image rather than a
+sample one. To read them off the cluster:
+
+```bash
+kubectl get pods -A -o json | python3 -c 'import json,sys
+seen = {}
+for p in json.load(sys.stdin)["items"]:
+    for c in (p["spec"].get("containers") or []) + (p["spec"].get("initContainers") or []):
+        r = c.get("resources") or {}
+        if any("gpu" in k for s in ("limits", "requests") for k in (r.get(s) or {})):
+            seen[c["image"]] = seen.get(c["image"], 0) + 1
+for image, n in sorted(seen.items(), key=lambda kv: -kv[1]):
+    print(n, image)'
+```
+
+It prints a pod count and an image for every container that requests a GPU resource. The
+workshop repository has the same thing as `bin/gpu_images.py`, which also falls back to the pods
+running on GPU-capable nodes when nothing requests the resource.
+
 ```yaml
 apiVersion: v1
 kind: Pod
@@ -801,6 +820,25 @@ plugin が含まれるため、device plugin のデプロイは不要です。�
 ワークロードを動かしているクラスターでは、GPU の taint に加えて `br-test` の方も必要になります。
 
 ### 計測用の Pod
+
+すでに GPU ワークロードで使っているイメージを指定してください。そうすると数字がサンプルの
+イメージではなく自分のイメージについてのものになります。クラスターから読み取るには次のようにします。
+
+```bash
+kubectl get pods -A -o json | python3 -c 'import json,sys
+seen = {}
+for p in json.load(sys.stdin)["items"]:
+    for c in (p["spec"].get("containers") or []) + (p["spec"].get("initContainers") or []):
+        r = c.get("resources") or {}
+        if any("gpu" in k for s in ("limits", "requests") for k in (r.get(s) or {})):
+            seen[c["image"]] = seen.get(c["image"], 0) + 1
+for image, n in sorted(seen.items(), key=lambda kv: -kv[1]):
+    print(n, image)'
+```
+
+GPU リソースを要求している各コンテナについて、Pod 数とイメージを出力します。ワークショップ
+リポジトリには同じものが `bin/gpu_images.py` として入っており、要求しているものが無い場合は
+GPU 容量を持つノード上の Pod にフォールバックします。
 
 ```yaml
 apiVersion: v1

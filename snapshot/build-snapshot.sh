@@ -26,7 +26,6 @@ fi
 REGION="${REGION:-us-west-2}"
 NAME_PREFIX="${NAME_PREFIX:-br-startup}"
 K8S_VERSION="${K8S_VERSION:-1.34}"
-IMAGE="${IMAGE:-${WORKLOAD_IMAGE:-}}"
 SNAPSHOT_SIZE="${SNAPSHOT_SIZE:-80}"
 
 # Must have a GPU, because AMI_SSM_PATH below is the NVIDIA variant. See the check further
@@ -40,11 +39,43 @@ SSM_PARAM="${SSM_PARAM:-/${NAME_PREFIX}/image-cache-snapshot-id}"
 
 WORKDIR="${WORKDIR:-/tmp/bottlerocket-images-cache}"
 
-if [[ -z "${IMAGE}" ]]; then
-  echo "IMAGE is required, and WORKLOAD_IMAGE is not set in config.env either. Example:" >&2
-  echo "  IMAGE=763104351884.dkr.ecr.us-west-2.amazonaws.com/vllm:0.22.0-gpu-py312-cu130-ubuntu22.04-ec2 $0" >&2
+################################################################################
+# Which image to bake.
+#
+# A snapshot built from a tag nothing runs is a snapshot the node will not use: kubelet
+# compares the reference, so a different tag or digest means a full pull and the measurement
+# reads as the mechanism having no effect. So the cluster is asked what its GPU pods are
+# actually running, rather than the image being recalled or copied out of a manifest.
+#
+# In order: IMAGE, then the cluster, then WORKLOAD_IMAGE from config.env. The cluster comes
+# before config.env because config.env carries this workshop's own image, which is not the
+# right answer on a cluster that was running something before the workshop arrived.
+################################################################################
+CONTEXT_ARG=()
+[[ -n "${KARPENTER_CLUSTER:-}" ]] && CONTEXT_ARG=(--context "${KARPENTER_CLUSTER}")
+
+echo "==> which image to bake"
+IMAGE_SOURCE=""
+if [[ -n "${IMAGE:-}" ]]; then
+  IMAGE_SOURCE="the environment"
+elif IMAGE="$("${ROOT}/bin/gpu_images.py" "${CONTEXT_ARG[@]}" --one 2>/dev/null)" \
+     && [[ -n "${IMAGE}" ]]; then
+  IMAGE_SOURCE="the only image the cluster's GPU pods run"
+elif [[ -n "${WORKLOAD_IMAGE:-}" ]]; then
+  IMAGE="${WORKLOAD_IMAGE}"
+  IMAGE_SOURCE="WORKLOAD_IMAGE in config.env"
+else
+  echo "" >&2
+  echo "could not determine which image to bake." >&2
+  echo "" >&2
+  echo "IMAGE is unset, WORKLOAD_IMAGE is not set in config.env, and the cluster does not" >&2
+  echo "point at a single answer. What it does run:" >&2
+  echo "" >&2
+  "${ROOT}/bin/gpu_images.py" "${CONTEXT_ARG[@]}" >&2 || true
   exit 2
 fi
+echo "    ${IMAGE}"
+echo "    from ${IMAGE_SOURCE}"
 
 # The NVIDIA variant, so the cached layers land on the same OS the variants run on.
 AMI_SSM_PATH="/aws/service/bottlerocket/aws-k8s-${K8S_VERSION}-nvidia/x86_64/latest/image_id"
@@ -79,7 +110,6 @@ echo "    ${GPU_COUNT} GPU(s)"
 
 echo "==> region                ${REGION}"
 echo "==> bottlerocket AMI path ${AMI_SSM_PATH}"
-echo "==> image                 ${IMAGE}"
 echo "==> snapshot size         ${SNAPSHOT_SIZE} GiB"
 
 if [[ ! -d "${WORKDIR}" ]]; then
