@@ -5,6 +5,13 @@
 Goal: determine how the startup time divides into stages, so that the later steps have
 figures to be compared against.
 
+![Step 1 — baseline](../images/01-baseline.png)
+
+Demo run of 2026-09-09 on `g6.8xlarge` with a 9.35 GB image. The bar measures time to a
+`nvidia-smi` readiness check, which is not the same as the model being ready to serve, and it is
+one run. Figures quoted in the text below may come from a different run on a different instance
+type; [REFERENCE-RESULTS.md](../REFERENCE-RESULTS.md) says which.
+
 ---
 
 ## What you configure
@@ -163,6 +170,13 @@ Next: [Step 2 — pre-bake the image into an EBS snapshot](02-snapshot.md)
 
 目的: 起動時間が段階ごとにどう分かれるかを確認し、以降のステップの比較対象となる数字を
 得ます。
+
+![ステップ 1 — ベースライン](../images/01-baseline.png)
+
+2026-09-09 に `g6.8xlarge`、9.35 GB のイメージで計測したものです。バーが測っているのは
+`nvidia-smi` による readiness までの時間で、モデルが応答可能になるまでとは別です。1 回の計測です。
+以下の本文が引用する数字は別のインスタンスタイプでの別の実行のことがあり、その対応は
+[REFERENCE-RESULTS.md](../REFERENCE-RESULTS.md) にあります。
 
 ---
 

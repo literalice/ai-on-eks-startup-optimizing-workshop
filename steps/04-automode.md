@@ -5,6 +5,13 @@
 Goal: determine how much of step 3's configuration EKS Auto Mode performs without being
 configured, and which options are not available in exchange.
 
+![Step 4 — EKS Auto Mode](../images/04-automode.png)
+
+Demo run of 2026-09-09 on `g6.8xlarge` with a 9.35 GB image. The bar measures time to a
+`nvidia-smi` readiness check, which is not the same as the model being ready to serve, and it is
+one run. Figures quoted in the text below may come from a different run on a different instance
+type; [REFERENCE-RESULTS.md](../REFERENCE-RESULTS.md) says which.
+
 ---
 
 ## The configuration
@@ -128,6 +135,13 @@ Next: [Step 5 — cold first pod versus warm scale-out](05-warm.md)
 
 目的: ステップ 3 の設定のうち、EKS Auto Mode が設定なしで実施する範囲と、その代わりに
 使えなくなる選択肢を確認します。
+
+![ステップ 4 — EKS Auto Mode](../images/04-automode.png)
+
+2026-09-09 に `g6.8xlarge`、9.35 GB のイメージで計測したものです。バーが測っているのは
+`nvidia-smi` による readiness までの時間で、モデルが応答可能になるまでとは別です。1 回の計測です。
+以下の本文が引用する数字は別のインスタンスタイプでの別の実行のことがあり、その対応は
+[REFERENCE-RESULTS.md](../REFERENCE-RESULTS.md) にあります。
 
 ---
 

@@ -24,6 +24,13 @@ the node.
 | `soci` | Karpenter + Bottlerocket | container storage on local NVMe, SOCI snapshotter in parallel pull/unpack mode | `instanceStorePolicy` and 6 lines of Bottlerocket settings |
 | `automode` | EKS Auto Mode | local NVMe and parallel pull, both set up by the service | none |
 
+![The four variants](images/overview.png)
+
+Each variant has its own diagram in its step. Demo run of 2026-09-09 on `g6.8xlarge` with a
+9.35 GB image, measured to a `nvidia-smi` readiness check rather than to the model being ready to
+serve. [REFERENCE-RESULTS.md](REFERENCE-RESULTS.md) carries the figures and says which run each
+came from.
+
 Two constraints apply.
 
 **`snapshot` and `soci` cannot both be used on the same node.** Both of them govern the
@@ -585,6 +592,7 @@ bin/
   record.sh                       asciinema to gif to mp4
   rehearse.sh                     demo.sh against fixtures, no AWS calls
 steps/                            the hands-on steps, one per configuration change
+images/                           one diagram per variant, embedded in the steps
 rehearsal/                        fixture data and a fake kubectl
 raw/                              per-run Kubernetes objects, kept for reference
 results/                          per-run JSON and report.md
@@ -647,6 +655,13 @@ variant は 4 つあります。Pod spec、インスタンスタイプ、VPC、�
 | `snapshot` | Karpenter + Bottlerocket | イメージ層を含む EBS スナップショットからデータボリュームを復元 | イメージ版ごとにスナップショットを作成・維持 |
 | `soci` | Karpenter + Bottlerocket | コンテナストレージをローカル NVMe に置き、SOCI snapshotter を parallel pull/unpack モードで使用 | `instanceStorePolicy` と Bottlerocket 設定 6 行 |
 | `automode` | EKS Auto Mode | ローカル NVMe と並列 pull をサービスが設定 | なし |
+
+![4 つの variant](images/overview.png)
+
+各 variant の図はそれぞれのステップにあります。2026-09-09 に `g6.8xlarge`、9.35 GB のイメージで
+計測したもので、測っているのはモデルが応答可能になるまでではなく `nvidia-smi` による readiness
+までです。数字と、それぞれがどの実行のものかは
+[REFERENCE-RESULTS.md](REFERENCE-RESULTS.md) にあります。
 
 制約が 2 つあります。
 
@@ -1188,6 +1203,7 @@ bin/
   record.sh                       asciinema から gif、mp4 へ
   rehearse.sh                     フィクスチャでの demo.sh。AWS 呼び出しなし
 steps/                            ハンズオンのステップ。設定変更ごとに 1 つ
+images/                           variant ごとの図。各ステップに埋め込み
 rehearsal/                        フィクスチャデータと偽の kubectl
 raw/                              実行ごとの Kubernetes オブジェクト
 results/                          実行ごとの JSON と report.md

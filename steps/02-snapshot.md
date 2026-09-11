@@ -4,6 +4,13 @@
 
 Goal: remove the image pull, and measure what maintaining that arrangement costs.
 
+![Step 2 — EBS snapshot](../images/02-snapshot.png)
+
+Demo run of 2026-09-09 on `g6.8xlarge` with a 9.35 GB image. The bar measures time to a
+`nvidia-smi` readiness check, which is not the same as the model being ready to serve, and it is
+one run. Figures quoted in the text below may come from a different run on a different instance
+type; [REFERENCE-RESULTS.md](../REFERENCE-RESULTS.md) says which.
+
 ---
 
 ## How it works
@@ -220,6 +227,13 @@ Next: [Step 3 — local NVMe and the SOCI snapshotter](03-soci.md)
 [English](#step-2--pre-bake-the-image-into-an-ebs-snapshot) | **日本語**
 
 目的: イメージ pull を無くし、その方式の維持コストを把握します。
+
+![ステップ 2 — EBS スナップショット](../images/02-snapshot.png)
+
+2026-09-09 に `g6.8xlarge`、9.35 GB のイメージで計測したものです。バーが測っているのは
+`nvidia-smi` による readiness までの時間で、モデルが応答可能になるまでとは別です。1 回の計測です。
+以下の本文が引用する数字は別のインスタンスタイプでの別の実行のことがあり、その対応は
+[REFERENCE-RESULTS.md](../REFERENCE-RESULTS.md) にあります。
 
 ---
 
