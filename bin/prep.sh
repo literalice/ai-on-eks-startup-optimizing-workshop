@@ -20,36 +20,124 @@ need kubectl
 need python3
 
 ################################################################################
-# Two values come from Terraform: the node IAM role the EC2NodeClass references, and
-# the weights bucket.
-#
-# Both can also be supplied through the environment, so the workshop can be run
-# against clusters that were not provisioned from this directory's Terraform state.
+# kubeconfig first, because the values below are read from the cluster where possible.
 ################################################################################
-if [[ -n "${KARPENTER_NODE_IAM_ROLE_NAME:-}" ]]; then
-  echo "==> using KARPENTER_NODE_IAM_ROLE_NAME from the environment"
-  MODEL_BUCKET_TF="${MODEL_BUCKET:-}"
-elif [[ -f "${ROOT}/terraform/terraform.tfstate" ]] || terraform -chdir="${ROOT}/terraform" output >/dev/null 2>&1; then
-  echo "==> reading terraform outputs"
-  KARPENTER_NODE_IAM_ROLE_NAME="$(terraform -chdir="${ROOT}/terraform" output -raw karpenter_node_iam_role_name)"
-  MODEL_BUCKET_TF="$(terraform -chdir="${ROOT}/terraform" output -raw model_bucket)"
-else
-  echo "no terraform state in ${ROOT}/terraform and KARPENTER_NODE_IAM_ROLE_NAME is unset." >&2
-  echo "Either run terraform apply there, or export the value:" >&2
-  echo "  KARPENTER_NODE_IAM_ROLE_NAME=<role name> MODEL_BUCKET=<bucket> bin/prep.sh" >&2
-  exit 1
-fi
-
-echo "    karpenter node role : ${KARPENTER_NODE_IAM_ROLE_NAME}"
-echo "    model bucket        : ${MODEL_BUCKET:-${MODEL_BUCKET_TF:-<unset>}}"
-
-if [[ -z "${MODEL_BUCKET}" ]]; then
-  echo "    NOTE: MODEL_BUCKET is empty. Set it in config.env before phase 2."
-fi
-
 echo "==> kubeconfig"
 aws eks update-kubeconfig --region "${REGION}" --name "${KARPENTER_CLUSTER}" --alias "${KARPENTER_CLUSTER}" >/dev/null
 aws eks update-kubeconfig --region "${REGION}" --name "${AUTOMODE_CLUSTER}" --alias "${AUTOMODE_CLUSTER}" >/dev/null
+
+################################################################################
+# Two values have to be resolved: the node IAM role the EC2NodeClass references, and the
+# weights bucket. Neither is read from Terraform if it can be read from the cluster or from
+# AWS, so this works against a cluster whose state lives somewhere else or nowhere.
+#
+# The role cannot be discovered from AWS alone. Both the Karpenter node role and a managed
+# node group's role appear as EC2_LINUX access entries and carry the same tags, so there is
+# nothing there to tell them apart. What is unambiguous is an EC2NodeClass that already names
+# one, which covers any cluster already running Karpenter. On a cluster built from this
+# directory's Terraform there are no node classes until this script creates them, so the
+# Terraform output is the source on the first run.
+################################################################################
+
+# `terraform output -raw` writes its warnings to stdout as well as stderr and exits 0 when the
+# state has no outputs. Capturing it without checking puts a multi-line warning into the
+# variable, which then reaches sed and fails there instead of here:
+#
+#   sed: 1: "s|@KARPENTER_NODE_IAM_R ...": unescaped newline inside substitute pattern
+sane_name() {
+  local value="$1"
+  [[ "$(printf '%s' "${value}" | wc -l | tr -d ' ')" == "0" ]] || return 1
+  [[ -n "${value}" && "${value}" =~ ^[A-Za-z0-9._-]+$ ]] || return 1
+  printf '%s' "${value}"
+}
+
+tf_output() {
+  local value
+  value="$(terraform -chdir="${ROOT}/terraform" output -raw "$1" 2>/dev/null)" || return 1
+  sane_name "${value}"
+}
+
+# From any EC2NodeClass in the cluster. Skips the ones this workshop owns, so a re-run reads
+# the cluster's own rather than echoing back what it wrote last time.
+role_from_cluster() {
+  local value
+  value="$(kubectl --context "${KARPENTER_CLUSTER}" get ec2nodeclass -o json 2>/dev/null \
+    | python3 -c 'import json,sys
+mine = {"baseline", "snapshot", "soci"}
+try:
+    items = json.load(sys.stdin).get("items", [])
+except Exception:
+    sys.exit(1)
+for source in (False, True):
+    for i in items:
+        if (i["metadata"]["name"] in mine) is source:
+            role = (i.get("spec") or {}).get("role")
+            if role:
+                print(role)
+                sys.exit(0)
+sys.exit(1)' 2>/dev/null)" || return 1
+  sane_name "${value}"
+}
+
+# The bucket carries the Purpose tag, and its name starts with the prefix, which keeps this
+# from picking up a bucket belonging to another copy of this workshop in the same account.
+bucket_from_tags() {
+  local value
+  value="$(aws resourcegroupstaggingapi get-resources --region "${REGION}" \
+    --tag-filters "Key=Purpose,Values=bottlerocket-startup-workshop" \
+    --resource-type-filters s3 \
+    --query "ResourceTagMappingList[].ResourceARN" --output text 2>/dev/null \
+    | tr '\t' '\n' | sed 's|^arn:aws:s3:::||' \
+    | grep "^${NAME_PREFIX}-models-" | head -1)" || return 1
+  sane_name "${value}"
+}
+
+if [[ -n "${KARPENTER_NODE_IAM_ROLE_NAME:-}" ]]; then
+  ROLE_SOURCE="the environment"
+elif KARPENTER_NODE_IAM_ROLE_NAME="$(role_from_cluster)"; then
+  ROLE_SOURCE="an existing EC2NodeClass in ${KARPENTER_CLUSTER}"
+elif KARPENTER_NODE_IAM_ROLE_NAME="$(tf_output karpenter_node_iam_role_name)"; then
+  ROLE_SOURCE="terraform output"
+else
+  echo "" >&2
+  echo "could not resolve the Karpenter node IAM role." >&2
+  echo "" >&2
+  echo "It was not in the environment, no EC2NodeClass in ${KARPENTER_CLUSTER} names one," >&2
+  echo "and ${ROOT}/terraform has no karpenter_node_iam_role_name output." >&2
+  echo "" >&2
+  echo "If this is the workshop's own environment and Terraform has not run yet:" >&2
+  echo "  terraform -chdir=terraform init && terraform -chdir=terraform apply" >&2
+  echo "" >&2
+  echo "Otherwise supply it. It is the role Karpenter's nodes assume:" >&2
+  echo "  KARPENTER_NODE_IAM_ROLE_NAME=<role name> bin/prep.sh" >&2
+  echo "" >&2
+  echo "Applying these settings to a cluster that already runs your workloads is better done" >&2
+  echo "from EXISTING-CLUSTER.md than from this script. This one creates node pools named" >&2
+  echo "baseline, snapshot and soci with no prefix and without the taint that keeps existing" >&2
+  echo "workloads off them." >&2
+  exit 1
+fi
+
+if [[ -n "${MODEL_BUCKET:-}" ]]; then
+  BUCKET_SOURCE="config.env or the environment"
+elif MODEL_BUCKET="$(bucket_from_tags)"; then
+  BUCKET_SOURCE="the Purpose tag"
+elif MODEL_BUCKET="$(tf_output model_bucket)"; then
+  BUCKET_SOURCE="terraform output"
+else
+  MODEL_BUCKET=""
+  BUCKET_SOURCE=""
+fi
+export MODEL_BUCKET
+
+echo "    karpenter node role : ${KARPENTER_NODE_IAM_ROLE_NAME}  (from ${ROLE_SOURCE})"
+if [[ -n "${MODEL_BUCKET}" ]]; then
+  echo "    model bucket        : ${MODEL_BUCKET}  (from ${BUCKET_SOURCE})"
+else
+  echo "    model bucket        : <unset>"
+  echo "    Steps 6 and 7 read the weights from S3 and need it. Run snapshot/stage-model.sh,"
+  echo "    or set MODEL_BUCKET in config.env."
+fi
 
 ################################################################################
 # Refuse a P-family instance type on cost. The model fits in 24 GB, so a P type measures the
@@ -112,6 +200,20 @@ fi
 # cannot match inside a longer one.
 render() {
   local src="$1" dst="$2"
+
+  # Every substitution below is a single line by construction. Check it here as well, because
+  # sed's failure for a multi-line value names the pattern rather than the value and reads as a
+  # problem with the manifest.
+  local name value
+  for name in KARPENTER_NODE_IAM_ROLE_NAME GPU_INSTANCE_TYPE SNAPSHOT_ID; do
+    value="${!name}"
+    if [[ "${value}" == *$'\n'* ]]; then
+      echo "${name} contains a newline, so it cannot be substituted into a manifest:" >&2
+      printf '%s\n' "${value}" | sed 's/^/    /' >&2
+      exit 1
+    fi
+  done
+
   sed \
     -e "s|@KARPENTER_NODE_IAM_ROLE_NAME@|${KARPENTER_NODE_IAM_ROLE_NAME}|g" \
     -e "s|@GPU_INSTANCE_FAMILY@|${GPU_INSTANCE_TYPE%%.*}|g" \

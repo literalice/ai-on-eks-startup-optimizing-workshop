@@ -86,6 +86,29 @@ bin/show_config.sh baseline
 bin/bench.sh baseline
 ```
 
+`bin/prep.sh` needs two values: the node IAM role the node class references, and the weights
+bucket. It looks for each in three places and prints which one it used.
+
+| | Role | Bucket |
+|---|---|---|
+| 1 | `KARPENTER_NODE_IAM_ROLE_NAME` | `MODEL_BUCKET`, from `config.env` or the environment |
+| 2 | an existing `EC2NodeClass` in the cluster | the bucket tagged `Purpose=bottlerocket-startup-workshop` |
+| 3 | `terraform output` | `terraform output` |
+
+So it works against a cluster whose Terraform state is somewhere else, or that has no Terraform
+state at all. The Terraform output is only reached on the first run against a freshly built
+environment, before any node class exists.
+
+The role cannot be found from AWS alone. A Karpenter node role and a managed node group's role
+both appear as `EC2_LINUX` access entries and can carry the same tags, so there is nothing there
+to tell them apart. To supply it directly:
+
+```bash
+KARPENTER_NODE_IAM_ROLE_NAME=<role name> bin/prep.sh
+```
+
+The bucket is only needed by steps 6 and 7, so a missing one is not an error here.
+
 Each step's figure prints as it completes. The image pull stage is the one that takes
 noticeably longer than the others:
 
@@ -220,6 +243,29 @@ bin/prep.sh                    # node class と node pool を適用
 bin/show_config.sh baseline
 bin/bench.sh baseline
 ```
+
+`bin/prep.sh` は 2 つの値を必要とします。node class が参照するノード IAM ロールと、ウェイト用の
+バケットです。それぞれ 3 か所を順に探し、どれを使ったかを出力します。
+
+| | ロール | バケット |
+|---|---|---|
+| 1 | `KARPENTER_NODE_IAM_ROLE_NAME` | `MODEL_BUCKET`（`config.env` または環境変数） |
+| 2 | クラスター内の既存の `EC2NodeClass` | `Purpose=bottlerocket-startup-workshop` タグの付いたバケット |
+| 3 | `terraform output` | `terraform output` |
+
+したがって Terraform の state が別の場所にあるクラスターでも、state が存在しないクラスターでも
+動きます。`terraform output` に到達するのは、新規構築した環境に対する初回実行時、node class が
+まだ存在しない場合だけです。
+
+ロールを AWS 側だけから特定することはできません。Karpenter のノードロールとマネージド
+ノードグループのロールはどちらも `EC2_LINUX` のアクセスエントリとして現れ、同じタグを持ちうるため、
+区別する手がかりがありません。直接渡す場合は次のようにします。
+
+```bash
+KARPENTER_NODE_IAM_ROLE_NAME=<ロール名> bin/prep.sh
+```
+
+バケットはステップ 6 と 7 でしか使わないので、ここで無くてもエラーにはなりません。
 
 各段階の数字は完了時に出力されます。イメージ pull の段階が他より明らかに長くなります。
 

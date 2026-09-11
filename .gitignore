@@ -20,6 +20,10 @@ recording/*
 rehearsal/.fixtures/
 rehearsal/.sandbox/
 
+# Local mise overrides. These name one operator's AWS profile and account, which
+# is nobody else's default.
+mise.local.toml
+
 __pycache__/
 *.pyc
 
