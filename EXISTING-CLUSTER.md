@@ -80,6 +80,26 @@ export GPU_TYPE=gr6.8xlarge          # or another type with instance store
 export PREFIX=br-test                # prefixes the NodePool and EC2NodeClass names
 ```
 
+If Karpenter already runs in this cluster, three fields of the node class below can usually be
+copied from a node class you already have: `role`, `securityGroupSelectorTerms` and
+`subnetSelectorTerms`. The nodes it launches join the same cluster and sit in the same subnets,
+so the same values apply.
+
+```bash
+kubectl get ec2nodeclass -o jsonpath='{range .items[*]}{"\n=== "}{.metadata.name}{"\nrole: "}{.spec.role}{"\nsecurityGroupSelectorTerms: "}{.spec.securityGroupSelectorTerms}{"\nsubnetSelectorTerms: "}{.spec.subnetSelectorTerms}{"\n"}{end}'
+```
+
+```
+=== gpu-workers
+role: my-cluster-karpenter-node
+securityGroupSelectorTerms: [{"tags":{"karpenter.sh/discovery":"my-cluster"}}]
+subnetSelectorTerms: [{"tags":{"karpenter.sh/discovery":"my-cluster"}}]
+```
+
+Check the subnets before reusing them. If an existing node class is restricted to a subset of
+subnets, that restricts which Availability Zones the GPU type can be launched in, and a type
+with no capacity in those zones leaves the pod `Pending`.
+
 ---
 
 ## Step 1. A baseline node class, with no optimization
@@ -117,6 +137,15 @@ spec:
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: "<CLUSTER>"
+  # If you hold an On-Demand Capacity Reservation for the GPU type, name it here and the
+  # NodePool below can draw from it. By ID:
+  # capacityReservationSelectorTerms:
+  #   - id: cr-0123456789abcdef0
+  # Or by tag, which picks up reservations added later without editing this:
+  # capacityReservationSelectorTerms:
+  #   - tags:
+  #       purpose: gpu-inference
+  #     ownerID: "<account ID>"          # required when the reservation is shared with you
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -155,6 +184,9 @@ spec:
         - key: karpenter.sh/capacity-type
           operator: In
           values: ["on-demand"]
+          # Add "reserved" to let Karpenter use a capacity reservation named in the
+          # node class. Karpenter prefers it, because the reservation is already paid for:
+          # values: ["reserved", "on-demand"]
 ```
 
 `alias: bottlerocket@latest` resolves the `aws-k8s-<version>-nvidia` variant for GPU instance
@@ -290,6 +322,15 @@ spec:
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: "<CLUSTER>"
+  # If you hold an On-Demand Capacity Reservation for the GPU type, name it here and the
+  # NodePool below can draw from it. By ID:
+  # capacityReservationSelectorTerms:
+  #   - id: cr-0123456789abcdef0
+  # Or by tag, which picks up reservations added later without editing this:
+  # capacityReservationSelectorTerms:
+  #   - tags:
+  #       purpose: gpu-inference
+  #     ownerID: "<account ID>"          # required when the reservation is shared with you
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -326,6 +367,9 @@ spec:
         - key: karpenter.sh/capacity-type
           operator: In
           values: ["on-demand"]
+          # Add "reserved" to let Karpenter use a capacity reservation named in the
+          # node class. Karpenter prefers it, because the reservation is already paid for:
+          # values: ["reserved", "on-demand"]
 ```
 
 The builder does not need the GPU to pull layers. Pinning the same instance type as your
@@ -839,6 +883,26 @@ export GPU_TYPE=gr6.8xlarge          # またはインスタンスストア付�
 export PREFIX=br-test                # NodePool と EC2NodeClass 名の prefix
 ```
 
+このクラスターで既に Karpenter が動いている場合、以下の node class のうち 3 つのフィールドは、
+既存の node class からそのまま使える場合が多いです。`role`、`securityGroupSelectorTerms`、
+`subnetSelectorTerms` です。起動するノードは同じクラスターに join し、同じサブネットに置かれる
+ので、同じ値が当てはまります。
+
+```bash
+kubectl get ec2nodeclass -o jsonpath='{range .items[*]}{"\n=== "}{.metadata.name}{"\nrole: "}{.spec.role}{"\nsecurityGroupSelectorTerms: "}{.spec.securityGroupSelectorTerms}{"\nsubnetSelectorTerms: "}{.spec.subnetSelectorTerms}{"\n"}{end}'
+```
+
+```
+=== gpu-workers
+role: my-cluster-karpenter-node
+securityGroupSelectorTerms: [{"tags":{"karpenter.sh/discovery":"my-cluster"}}]
+subnetSelectorTerms: [{"tags":{"karpenter.sh/discovery":"my-cluster"}}]
+```
+
+サブネットは流用前に確認してください。既存の node class が一部のサブネットに限定されている場合、
+GPU タイプを起動できる AZ もその範囲に限定されます。その AZ に容量がないタイプだと Pod は
+`Pending` のままになります。
+
 ---
 
 ## ステップ 1. 最適化なしのベースライン node class
@@ -876,6 +940,15 @@ spec:
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: "<CLUSTER>"
+  # GPU タイプの On-Demand Capacity Reservation を持っている場合、ここで指定すると下の
+  # NodePool がそこから確保できます。ID 指定:
+  # capacityReservationSelectorTerms:
+  #   - id: cr-0123456789abcdef0
+  # タグ指定。後から追加した予約も、ここを編集せずに対象になります:
+  # capacityReservationSelectorTerms:
+  #   - tags:
+  #       purpose: gpu-inference
+  #     ownerID: "<アカウント ID>"        # 予約が共有されている場合は必須
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -914,6 +987,9 @@ spec:
         - key: karpenter.sh/capacity-type
           operator: In
           values: ["on-demand"]
+          # node class で指定した capacity reservation を使う場合は "reserved" を追加します。
+          # 予約は既に支払い済みなので、Karpenter はこちらを優先します:
+          # values: ["reserved", "on-demand"]
 ```
 
 `alias: bottlerocket@latest` は、GPU インスタンスタイプに対して `aws-k8s-<version>-nvidia`
@@ -1048,6 +1124,15 @@ spec:
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: "<CLUSTER>"
+  # GPU タイプの On-Demand Capacity Reservation を持っている場合、ここで指定すると下の
+  # NodePool がそこから確保できます。ID 指定:
+  # capacityReservationSelectorTerms:
+  #   - id: cr-0123456789abcdef0
+  # タグ指定。後から追加した予約も、ここを編集せずに対象になります:
+  # capacityReservationSelectorTerms:
+  #   - tags:
+  #       purpose: gpu-inference
+  #     ownerID: "<アカウント ID>"        # 予約が共有されている場合は必須
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -1084,6 +1169,9 @@ spec:
         - key: karpenter.sh/capacity-type
           operator: In
           values: ["on-demand"]
+          # node class で指定した capacity reservation を使う場合は "reserved" を追加します。
+          # 予約は既に支払い済みなので、Karpenter はこちらを優先します:
+          # values: ["reserved", "on-demand"]
 ```
 
 レイヤの pull に GPU は不要です。それでもワークロードノードと同じインスタンスタイプを指定するのは、
