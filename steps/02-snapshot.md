@@ -81,48 +81,43 @@ with no cluster involved, which is what a pipeline triggered by an image build n
 > [step 1](01-baseline.md#why-the-alias-rather-than-a-pinned-nvidia-ami) for the boot
 > sequence. The script checks this before launching anything.
 
-### The other two ways, and when they win
+### The other way, and when it wins
 
-There are three places the snapshot can come from. The workshop walks through the first one
-only; the other two are listed so you can tell whether your environment changes the answer.
+The snapshot can also be taken from a node in your own cluster, in a node pool that exists
+only for building.
 
 | Source | Consistent | Contents | Volume size | Needs |
 |---|---|---|---|---|
 | **Dedicated builder instance** (`build-snapshot.sh`) | Yes — instance stopped first | Only the images you name | `SNAPSHOT_SIZE` | An instance with an SSM-capable role; no cluster |
-| **A build-only node in the cluster** (`snapshot-from-node.sh` with `SOURCE_NODEPOOL`) | No — volume is mounted | Your images plus kubelet state and DaemonSet images | The node class's `blockDeviceMappings` | A node pool you taint so nothing else lands there |
-| **An existing workload node** (`snapshot-from-node.sh`) | No — volume is mounted | Whatever that node has pulled | Inherited from the node | Nothing |
+| **A build-only node pool** (`snapshot-from-node.sh` with `SOURCE_NODEPOOL`) | No — volume is mounted | Your images, plus the images of any DaemonSet that tolerates the taint | The node class's `blockDeviceMappings` | A node pool you taint so nothing else lands there |
 
-The middle row is the one worth knowing about, because it wins on a case the builder does
-not cover: **images that need pull credentials the cluster already holds.** The builder pulls
-with its instance role, so ECR works and a private third-party registry needing an
-`imagePullSecret` does not. A node in the cluster pulls the way your workloads do. It also
-suits accounts where launching an ad-hoc instance with its own IAM role outside the cluster
-is not permitted, or where SSM is unreachable from the subnets the snapshot must live in.
+The second row wins on a case the builder does not cover: **images that need pull credentials
+the cluster already holds.** The builder pulls with its instance role, so ECR works and a
+private third-party registry needing an `imagePullSecret` does not. A node in the cluster pulls
+the way your workloads do. It also suits accounts where launching an ad-hoc instance with its
+own IAM role outside the cluster is not permitted, or where SSM is unreachable from the subnets
+the snapshot must live in.
 
-It needs no separate script. Create a node pool for building, taint it so only the build pod
-tolerates it, run a pod that pulls the images, then point the existing script at that pool:
+Create a node pool for building, taint it so only the build pod tolerates it, run a pod that
+pulls the images, then point the script at that pool:
 
 ```bash
 SOURCE_NODEPOOL=snapshot-builder snapshot/snapshot-from-node.sh
 ```
 
-What neither of the lower two rows gives you is a consistent snapshot. The volume is mounted
-and being written, so the result is crash-consistent. For a read-only image cache a partially
-written layer is discarded and re-pulled, so the effect is limited — but that is a property of
-this workload, not a general guarantee. You cannot fix it by stopping the instance either,
-because Karpenter would see the node as unhealthy and replace it.
+[EXISTING-CLUSTER.md](../EXISTING-CLUSTER.md#building-the-snapshot-from-a-node-pool-that-exists-only-to-build)
+has the whole thing as YAML and `aws` commands, for applying it to a cluster without this
+repository.
 
-The bottom row is for a quick one-off. In this workshop, step 1 already leaves such a node:
+What this row does not give you is a consistent snapshot. The volume is mounted, so the result
+is crash-consistent. The pull has finished before the snapshot is taken, and a partially written
+layer would be discarded and re-pulled, so the effect is limited — but that is a property of an
+image cache, not a general guarantee. You cannot fix it by stopping the instance either, because
+Karpenter would see the node as unhealthy and replace it.
 
-```bash
-bin/bench.sh baseline                # leaves such a node; do not reset afterwards
-snapshot/snapshot-from-node.sh       # takes 3-5 minutes
-```
-
-> For either of the lower two rows the node must not be a `soci` node. `soci` sets
-> `instanceStorePolicy`, which moves container storage to local NVMe, so its EBS data volume
-> is empty. Snapshotting it produces an empty snapshot, and `snapshot` then pulls the image
-> as normal.
+> The build node must not be a `soci` node. `soci` sets `instanceStorePolicy`, which moves
+> container storage to local NVMe, so its EBS data volume is empty. Snapshotting it produces an
+> empty snapshot, and `snapshot` then pulls the image as normal.
 
 ---
 
@@ -302,49 +297,42 @@ IMAGE="<上記のいずれか>" snapshot/build-snapshot.sh            # 直接�
 > [ステップ 1](01-baseline.md#nvidia-ami-を固定せず-alias-を使う理由) にあります。本スクリプトは
 > インスタンス起動前にこれを検査します。
 
-### 残る 2 つの方法と、それが有利になる条件
+### もう 1 つの方法と、それが有利になる条件
 
-スナップショットの取得元は 3 通りあります。ワークショップで手順を追うのは 1 つ目だけです。
-残りは、自身の環境で答えが変わるかどうかを判断できるように併記します。
+スナップショットは、自分のクラスター内のノードから取ることもできます。ビルドのためだけに
+存在する node pool を使います。
 
 | 取得元 | 整合性 | 内容 | ボリュームサイズ | 必要なもの |
 |---|---|---|---|---|
 | **専用ビルダーインスタンス**（`build-snapshot.sh`） | あり（先にインスタンスを停止） | 指定したイメージだけ | `SNAPSHOT_SIZE` | SSM を使えるロールを持つインスタンス。クラスターは不要 |
-| **クラスター内のビルド専用ノード**（`snapshot-from-node.sh` + `SOURCE_NODEPOOL`） | なし（マウント中） | 指定イメージ + kubelet state + DaemonSet のイメージ | node class の `blockDeviceMappings` | 他が載らないよう taint した node pool |
-| **稼働中のワークロードノード**（`snapshot-from-node.sh`） | なし（マウント中） | そのノードが pull したもの全部 | ノードから継承 | なし |
+| **ビルド専用の node pool**（`snapshot-from-node.sh` + `SOURCE_NODEPOOL`） | なし（マウント中） | 指定イメージ + taint を tolerate する DaemonSet のイメージ | node class の `blockDeviceMappings` | 他が載らないよう taint した node pool |
 
-知っておく価値があるのは中段です。ビルダーがカバーしない条件で有利になります。
-**クラスターが既に保持している認証情報を必要とするイメージ**です。ビルダーはインスタンス
-ロールで pull するため ECR は動きますが、`imagePullSecret` を要するサードパーティの
-プライベートレジストリは動きません。クラスター内のノードなら、ワークロードと同じ経路で
-pull します。クラスター外で独自 IAM ロールを持つ一時インスタンスを起動できないアカウントや、
-スナップショットを置くべきサブネットから SSM に到達できない場合にも適します。
+2 段目は、ビルダーがカバーしない条件で有利になります。**クラスターが既に保持している認証情報を
+必要とするイメージ**です。ビルダーはインスタンスロールで pull するため ECR は動きますが、
+`imagePullSecret` を要するサードパーティのプライベートレジストリは動きません。クラスター内の
+ノードなら、ワークロードと同じ経路で pull します。クラスター外で独自 IAM ロールを持つ一時
+インスタンスを起動できないアカウントや、スナップショットを置くべきサブネットから SSM に
+到達できない場合にも適します。
 
-専用のスクリプトは不要です。ビルド用の node pool を作り、ビルド Pod だけが tolerate する
-taint を付け、イメージを pull する Pod を動かしたうえで、既存のスクリプトをその pool に
-向けます。
+ビルド用の node pool を作り、ビルド Pod だけが tolerate する taint を付け、イメージを pull する
+Pod を動かしたうえで、スクリプトをその pool に向けます。
 
 ```bash
 SOURCE_NODEPOOL=snapshot-builder snapshot/snapshot-from-node.sh
 ```
 
-下 2 段のどちらでも得られないのが、整合したスナップショットです。ボリュームはマウントされ
-書き込みが続いているため、結果はクラッシュ整合になります。読み取り専用のイメージキャッシュ
-であれば書き込み途中の層は破棄されて再 pull されるので影響は限定的ですが、これはこの
-ワークロードの性質であり一般的な保証ではありません。インスタンスを停止して回避することも
-できません。Karpenter がノードを異常と判断して置き換えるためです。
+このリポジトリを持たないクラスターに適用する場合の YAML と `aws` コマンド一式は
+[EXISTING-CLUSTER.md](../EXISTING-CLUSTER.md#ビルド専用の-node-pool-から作る) にあります。
 
-最下段は一回限りの用途向けです。本ワークショップではステップ 1 がその状態のノードを残します。
+この方法で得られないのが、整合したスナップショットです。ボリュームはマウントされているため、
+結果はクラッシュ整合になります。pull はスナップショット取得より前に完了しており、書き込み途中の
+層は破棄されて再 pull されるので影響は限定的ですが、これはイメージキャッシュの性質であり一般的な
+保証ではありません。インスタンスを停止して回避することもできません。Karpenter がノードを異常と
+判断して置き換えるためです。
 
-```bash
-bin/bench.sh baseline                # この状態のノードが残る。以降 reset しない
-snapshot/snapshot-from-node.sh       # 3〜5 分
-```
-
-> 下 2 段のいずれでも、対象は `soci` のノードであってはいけません。`soci` は
-> `instanceStorePolicy` を設定してコンテナストレージをローカル NVMe に移すため、EBS データ
-> ボリュームは空です。これをスナップショットすると空のスナップショットができ、`snapshot` は
-> 通常どおり pull します。
+> ビルド用のノードは `soci` のノードであってはいけません。`soci` は `instanceStorePolicy` を
+> 設定してコンテナストレージをローカル NVMe に移すため、EBS データボリュームは空です。これを
+> スナップショットすると空のスナップショットができ、`snapshot` は通常どおり pull します。
 
 ---
 

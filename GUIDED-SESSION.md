@@ -191,7 +191,7 @@ expected. A workload pod appearing is worth stopping for.
 |---|---|---|
 | 1 | Baseline node class and node pool, and a pod | The pod stays `Pending` if the toleration does not match both taints |
 | 2 | Read the stages from `kubectl get events` | The `Pulled` event carries the duration and the image size |
-| 3 | Snapshot the node's `/dev/xvdb`, apply `snapshotID` | Three to five minutes for the snapshot |
+| 3 | A build-only node pool, a pod to pull the image, snapshot its `/dev/xvdb`, apply `snapshotID` | Three to five minutes for the snapshot. Delete the builder pool afterwards |
 | 4 | Or instead, `instanceStorePolicy: RAID0` and the SOCI settings | Not both. Step 3 of the runbook says why |
 | 5 | Delete the pod, reapply it, compare | The node survives because `consolidateAfter` is 30m |
 
@@ -437,7 +437,7 @@ taint を付けます。
 |---|---|---|
 | 1 | ベースライン node class と node pool、そして Pod | toleration が 2 つの taint 両方に一致しないと Pod は `Pending` のまま |
 | 2 | `kubectl get events` から段階を読む | `Pulled` イベントに所要時間とイメージサイズが入っている |
-| 3 | ノードの `/dev/xvdb` をスナップショットし、`snapshotID` を適用 | スナップショットに 3〜5 分 |
+| 3 | ビルド専用 node pool と pull 用 Pod を作り、その `/dev/xvdb` をスナップショットして `snapshotID` を適用 | スナップショットに 3〜5 分。終わったら builder pool を削除 |
 | 4 | あるいは代わりに `instanceStorePolicy: RAID0` と SOCI 設定 | 両方は不可。理由は runbook のステップ 3 |
 | 5 | Pod を削除して再適用し、比較 | `consolidateAfter` が 30m なのでノードは残る |
 

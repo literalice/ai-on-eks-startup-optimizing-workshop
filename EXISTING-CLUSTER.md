@@ -254,17 +254,122 @@ The layers go into a snapshot ahead of time, and the node restores its data volu
 node built this way, kubelet reports the image as already present and does not contact the
 registry.
 
-### Building the snapshot by hand
+### Building the snapshot from a node pool that exists only to build
 
-The workshop's script wraps `aws-samples/bottlerocket-images-cache`, which launches its own
-instance. Done by hand from a node you already have, it is four commands.
+Do not snapshot a node that runs workloads. Its data volume carries everything that node has
+ever pulled, and the snapshot inherits the volume's size, so every node restored from it gets a
+volume that large. A node pool created for building gives a snapshot whose contents you chose
+and whose size you set.
 
-Start from a node that has pulled the image, which the step 1 run leaves behind. Do not delete
-it first.
+It also pulls the way your workloads do, with the cluster's `imagePullSecret` if the image needs
+one. A tool that launches its own instance outside the cluster pulls with that instance's role,
+so a private registry needing a pull secret is a case this covers and that one does not.
+
+Four pieces: a node class, a node pool, a pod that does the pulling, and the snapshot itself.
+
+```yaml
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: br-test-builder
+spec:
+  amiSelectorTerms:
+    - alias: bottlerocket@latest
+  role: "<NODE_ROLE>"
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs: { volumeSize: 4Gi, volumeType: gp3, encrypted: true, deleteOnTermination: true }
+    - deviceName: /dev/xvdb
+      ebs:
+        volumeSize: 40Gi                # sized for the images, not for a workload node
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "<CLUSTER>"
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "<CLUSTER>"
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: br-test-builder
+spec:
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 1m              # short: this node has one job
+  template:
+    metadata:
+      labels:
+        br-test: builder
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: br-test-builder
+      taints:
+        # The same two-taint scheme as step 1, for the same reason: your existing GPU pods
+        # already tolerate the GPU taint, so that one alone would not keep them off.
+        - key: br-test
+          value: "true"
+          effect: NoSchedule
+        - key: nvidia.com/gpu
+          effect: NoSchedule
+      expireAfter: 1h
+      requirements:
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["<GPU_TYPE>"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+```
+
+The builder does not need the GPU to pull layers. Pinning the same instance type as your
+workload nodes keeps the AMI variant the same as the nodes the snapshot will be restored onto,
+which is one difference fewer to reason about.
+
+Then a pod whose only purpose is to make kubelet pull the image. It does not request a GPU, so
+it does not wait on the device plugin:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: br-test-pull
+  namespace: default
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    br-test: builder
+  tolerations:
+    - key: br-test
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: pull
+      image: <your GPU image>          # more than one? add a container per image
+      command: ["sleep", "600"]
+```
 
 ```bash
-# 1. the instance behind that node
-INSTANCE=$(kubectl get nodeclaim -l karpenter.sh/nodepool=br-test-baseline \
+kubectl wait --for=condition=Ready pod/br-test-pull --timeout=15m
+```
+
+`Ready` means the pull finished. Then four commands:
+
+```bash
+# 1. the instance behind the builder node
+INSTANCE=$(kubectl get nodeclaim -l karpenter.sh/nodepool=br-test-builder \
   -o jsonpath='{.items[0].status.providerID}' | sed 's|.*/||')
 echo "$INSTANCE"
 
@@ -284,18 +389,28 @@ echo "$SNAPSHOT"
 aws ec2 wait snapshot-completed --region "$REGION" --snapshot-ids "$SNAPSHOT"
 ```
 
-The volume is mounted and being written while it is snapshotted, so the result is
-crash-consistent rather than clean. For a read-only image cache the effect is limited: a
-partially written layer is discarded and pulled again. That is a property of this workload
-rather than a general guarantee.
+Then remove the builder, so its node is not left running:
 
-The snapshot also carries whatever else is on that node's data volume, and it inherits the
-volume's size, so every node restored from it gets a volume that large.
+```bash
+kubectl delete pod br-test-pull
+kubectl delete nodepool br-test-builder
+kubectl delete ec2nodeclass br-test-builder
+```
 
-For a clean snapshot, [`aws-samples/bottlerocket-images-cache`][cache] launches a dedicated
-instance, stops kubelet, removes the images already present, pulls only the ones you name, stops
-the instance and then snapshots. Steps 2 and 4 of that sequence are what make it consistent and
-free of anything you did not ask for.
+Two things this does not give you. The volume is mounted while it is snapshotted, so the result
+is crash-consistent rather than clean; the pull itself has finished by the time the pod is
+`Ready`, and a partially written layer would be discarded and pulled again, but that is a
+property of an image cache rather than a general guarantee. And any DaemonSet with a blanket
+toleration lands on the builder too, and its images go into the snapshot — which is the same
+check the taint section above asks you to run.
+
+Stopping the instance first would fix the consistency point, but Karpenter would see the node as
+unhealthy and replace it. [`aws-samples/bottlerocket-images-cache`][cache] does that safely by
+launching its own instance outside the cluster, stopping kubelet, removing the images already
+present, pulling only the ones you name and stopping the instance before it snapshots. Use it
+when you want the snapshot built from a tag by a pipeline with no cluster involved. Use the node
+pool above when the pull needs credentials the cluster holds, or when launching an ad-hoc
+instance outside the cluster is not something your account permits.
 
 [cache]: https://github.com/aws-samples/bottlerocket-images-cache
 
@@ -626,9 +741,9 @@ change in any of those.
 ## Cleaning up
 
 ```bash
-kubectl delete pod br-test-baseline br-test-snapshot br-test-soci --ignore-not-found
-kubectl delete nodepool br-test-baseline br-test-snapshot br-test-soci --ignore-not-found
-kubectl delete ec2nodeclass br-test-baseline br-test-snapshot br-test-soci --ignore-not-found
+kubectl delete pod br-test-baseline br-test-snapshot br-test-soci br-test-pull --ignore-not-found
+kubectl delete nodepool br-test-baseline br-test-snapshot br-test-soci br-test-builder --ignore-not-found
+kubectl delete ec2nodeclass br-test-baseline br-test-snapshot br-test-soci br-test-builder --ignore-not-found
 aws ec2 delete-snapshot --region "$REGION" --snapshot-id "$SNAPSHOT"
 ```
 
@@ -902,17 +1017,121 @@ kubectl get nodeclaim -l karpenter.sh/nodepool=br-test-baseline \
 レイヤを事前にスナップショットへ入れ、ノードはそこからデータボリュームを復元します。この方式の
 ノードでは kubelet がイメージを既に存在すると報告し、レジストリに接続しません。
 
-### スナップショットを手で作る
+### ビルド専用の node pool から作る
 
-ワークショップのスクリプトは `aws-samples/bottlerocket-images-cache` をラップし、専用インスタンスを
-起動します。既にあるノードから手で行う場合、コマンドは 4 つです。
+ワークロードが動いているノードをスナップショットしないでください。そのデータボリュームには
+そのノードが pull した全てが入っており、スナップショットはボリュームのサイズを継承するため、
+そこから復元する全ノードがその容量になります。ビルドのために作った node pool なら、内容も
+サイズも自分で決められます。
 
-イメージを pull 済みのノードから始めます。ステップ 1 の実行でそのノードが残っています。先に
-削除しないでください。
+pull の経路もワークロードと同じになり、イメージに `imagePullSecret` が必要ならそれが使われます。
+クラスター外に自前のインスタンスを起動するツールはそのインスタンスのロールで pull するため、
+pull secret が必要なプライベートレジストリはこちらでしか扱えません。
+
+必要なものは 4 つです。node class、node pool、pull を行う Pod、そしてスナップショットです。
+
+```yaml
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: br-test-builder
+spec:
+  amiSelectorTerms:
+    - alias: bottlerocket@latest
+  role: "<NODE_ROLE>"
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs: { volumeSize: 4Gi, volumeType: gp3, encrypted: true, deleteOnTermination: true }
+    - deviceName: /dev/xvdb
+      ebs:
+        volumeSize: 40Gi                # ワークロードノードではなくイメージに合わせる
+        volumeType: gp3
+        encrypted: true
+        deleteOnTermination: true
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "<CLUSTER>"
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "<CLUSTER>"
+---
+apiVersion: karpenter.sh/v1
+kind: NodePool
+metadata:
+  name: br-test-builder
+spec:
+  disruption:
+    consolidationPolicy: WhenEmpty
+    consolidateAfter: 1m              # このノードの仕事は 1 つなので短く
+  template:
+    metadata:
+      labels:
+        br-test: builder
+    spec:
+      nodeClassRef:
+        group: karpenter.k8s.aws
+        kind: EC2NodeClass
+        name: br-test-builder
+      taints:
+        # ステップ 1 と同じ 2 つの taint。理由も同じで、既存の GPU Pod は GPU の taint を
+        # すでに tolerate しているため、それだけでは排除できません。
+        - key: br-test
+          value: "true"
+          effect: NoSchedule
+        - key: nvidia.com/gpu
+          effect: NoSchedule
+      expireAfter: 1h
+      requirements:
+        - key: kubernetes.io/os
+          operator: In
+          values: ["linux"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: ["<GPU_TYPE>"]
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["on-demand"]
+```
+
+レイヤの pull に GPU は不要です。それでもワークロードノードと同じインスタンスタイプを指定するのは、
+スナップショットを復元する先のノードと AMI variant を揃え、考慮すべき差異を 1 つ減らすためです。
+
+次に、kubelet にイメージを pull させるためだけの Pod です。GPU を要求しないので、device plugin を
+待ちません。
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: br-test-pull
+  namespace: default
+spec:
+  restartPolicy: Never
+  nodeSelector:
+    br-test: builder
+  tolerations:
+    - key: br-test
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
+  containers:
+    - name: pull
+      image: <GPU イメージ>              # 複数ある場合はイメージごとに container を追加
+      command: ["sleep", "600"]
+```
 
 ```bash
-# 1. そのノードの実体であるインスタンス
-INSTANCE=$(kubectl get nodeclaim -l karpenter.sh/nodepool=br-test-baseline \
+kubectl wait --for=condition=Ready pod/br-test-pull --timeout=15m
+```
+
+`Ready` は pull が完了したことを意味します。ここからコマンドは 4 つです。
+
+```bash
+# 1. builder ノードの実体であるインスタンス
+INSTANCE=$(kubectl get nodeclaim -l karpenter.sh/nodepool=br-test-builder \
   -o jsonpath='{.items[0].status.providerID}' | sed 's|.*/||')
 echo "$INSTANCE"
 
@@ -932,17 +1151,27 @@ echo "$SNAPSHOT"
 aws ec2 wait snapshot-completed --region "$REGION" --snapshot-ids "$SNAPSHOT"
 ```
 
-ボリュームはマウントされ書き込みが続いている状態で取得するため、結果は整合ではなくクラッシュ
-整合です。読み取り専用のイメージキャッシュであれば影響は限定的で、書き込み途中のレイヤは破棄
-されて再 pull されます。これはこのワークロードの性質であり、一般的な保証ではありません。
+終わったら builder を片付けます。ノードを起動したままにしないためです。
 
-またスナップショットには、そのノードのデータボリューム上の他のものも含まれ、ボリュームのサイズを
-継承します。そこから復元する全ノードがその容量になります。
+```bash
+kubectl delete pod br-test-pull
+kubectl delete nodepool br-test-builder
+kubectl delete ec2nodeclass br-test-builder
+```
 
-整合したスナップショットが必要な場合、[`aws-samples/bottlerocket-images-cache`][cache] は専用
-インスタンスを起動し、kubelet を停止し、既存イメージを削除し、指定したイメージだけを pull し、
-インスタンスを停止してからスナップショットを取ります。この手順の 2 番目と 4 番目が、整合性と
-「指定していないものを含まない」ことを担保しています。
+これで得られないものが 2 つあります。ボリュームはマウントされた状態で取得するため、結果は整合では
+なくクラッシュ整合です。pull 自体は Pod が `Ready` になった時点で完了しており、書き込み途中の
+レイヤは破棄されて再 pull されますが、これはイメージキャッシュの性質であり一般的な保証では
+ありません。もう 1 つは、無条件 toleration を持つ DaemonSet は builder にも載るため、そのイメージが
+スナップショットに入ることです。これは上の taint の節で確認を求めているものと同じです。
+
+インスタンスを先に停止すれば整合性の点は解決しますが、Karpenter はそのノードを unhealthy と見なして
+置き換えます。[`aws-samples/bottlerocket-images-cache`][cache] はクラスター外に自前のインスタンスを
+起動し、kubelet を停止し、既存イメージを削除し、指定したイメージだけを pull し、インスタンスを
+停止してからスナップショットを取ることで、これを安全に行います。クラスターを介さずパイプラインが
+タグからスナップショットを作る場合はこちらを使ってください。pull にクラスターが持つ資格情報が必要な
+場合、あるいはクラスター外にアドホックなインスタンスを起動することがアカウントの方針で許されない
+場合は、上の node pool を使ってください。
 
 ### 適用する
 
@@ -1261,9 +1490,9 @@ kubectl logs <pod> | grep "Directly load"
 ## 後片付け
 
 ```bash
-kubectl delete pod br-test-baseline br-test-snapshot br-test-soci --ignore-not-found
-kubectl delete nodepool br-test-baseline br-test-snapshot br-test-soci --ignore-not-found
-kubectl delete ec2nodeclass br-test-baseline br-test-snapshot br-test-soci --ignore-not-found
+kubectl delete pod br-test-baseline br-test-snapshot br-test-soci br-test-pull --ignore-not-found
+kubectl delete nodepool br-test-baseline br-test-snapshot br-test-soci br-test-builder --ignore-not-found
+kubectl delete ec2nodeclass br-test-baseline br-test-snapshot br-test-soci br-test-builder --ignore-not-found
 aws ec2 delete-snapshot --region "$REGION" --snapshot-id "$SNAPSHOT"
 ```
 

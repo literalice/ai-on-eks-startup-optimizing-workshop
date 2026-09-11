@@ -1,32 +1,28 @@
 #!/usr/bin/env bash
 #
-# Build the snapshot variant's EBS snapshot from a node that has already pulled the image.
+# Build the snapshot variant's EBS snapshot from a node in a node pool that exists only for
+# building, and which has already pulled the image.
 #
-#   bin/bench.sh baseline          # leaves a node with the image cached
-#   snapshot/snapshot-from-node.sh       # snapshot that node's data volume
+#   SOURCE_NODEPOOL=snapshot-builder snapshot/snapshot-from-node.sh
 #
-# This is the FALLBACK method. Prefer snapshot/build-snapshot.sh, which wraps
-# aws-samples/bottlerocket-images-cache. Reasons, in the order that matters for running
-# this in production:
+# SOURCE_NODEPOOL is required. It used to default to `baseline`, which snapshotted a node that
+# runs workloads: the result carried everything that node had ever pulled and inherited its
+# volume size, so every node restored from it got a volume that large. There is no case where
+# that is the better choice, so it is no longer reachable by accident.
 #
-#   1. That script stops kubelet and then stops the instance before snapshotting, so the
-#      snapshot is filesystem-consistent. This script snapshots a live, mounted volume.
-#   2. It removes any existing images first and pulls only the images you name, so the
-#      snapshot holds nothing else. A node's data volume also carries kubelet state, pod
-#      logs and any other image that node happened to pull.
-#   3. Its volume size is a parameter. This script inherits the node's data volume size, so
-#      every node restored from the result gets a volume that large whether it needs it or
-#      not.
-#   4. It runs from an image tag with no cluster involved, which is what a pipeline
-#      triggered by an image build needs.
+# Prefer snapshot/build-snapshot.sh, which wraps aws-samples/bottlerocket-images-cache. It
+# stops kubelet and then the instance before snapshotting, so the result is
+# filesystem-consistent; it removes existing images and pulls only the ones you name; its
+# volume size is a parameter; and it runs from an image tag with no cluster involved, which is
+# what a pipeline triggered by an image build needs.
 #
-# Use this script when a dedicated builder instance is not an option: SSM unreachable from
-# the target subnets, or an account where launching an ad-hoc instance with its own IAM role
-# is not permitted. Drain the node first if you use it for anything beyond a demo.
+# Use this script instead when the pull needs credentials the cluster already holds -- the
+# builder pulls with its instance role, so an imagePullSecret is not available to it -- or when
+# SSM is unreachable from the target subnets, or when launching an ad-hoc instance with its own
+# IAM role outside the cluster is not permitted.
 #
-# Requirements: a baseline (or any non-NVMe) node must be up with the image pulled.
-# The SOCI variant is not a valid source -- instanceStorePolicy moves container storage to
-# local NVMe, so its EBS data volume is empty.
+# The pool must not be a SOCI pool. instanceStorePolicy moves container storage to local NVMe,
+# so its EBS data volume is empty and the snapshot would hold no images.
 
 set -euo pipefail
 
@@ -36,8 +32,21 @@ ROOT="$(cd "${HERE}/.." && pwd)"
 # shellcheck source=../config.env
 source "${ROOT}/config.env"
 
-SOURCE_NODEPOOL="${SOURCE_NODEPOOL:-baseline}"
 DATA_DEVICE="${DATA_DEVICE:-/dev/xvdb}"
+
+if [[ -z "${SOURCE_NODEPOOL:-}" ]]; then
+  echo "SOURCE_NODEPOOL is required: the node pool whose node holds the images." >&2
+  echo "" >&2
+  echo "Create a pool for building, taint it so only your pull pod tolerates it, run a pod" >&2
+  echo "that pulls the images, then:" >&2
+  echo "  SOURCE_NODEPOOL=snapshot-builder $0" >&2
+  echo "" >&2
+  echo "Do not point this at a pool that runs workloads. The snapshot would carry everything" >&2
+  echo "those nodes have pulled and inherit their volume size." >&2
+  echo "" >&2
+  echo "For the workshop's own snapshot, use snapshot/build-snapshot.sh instead." >&2
+  exit 2
+fi
 
 echo "==> finding a node for ${SOURCE_NODEPOOL}"
 PROVIDER_ID="$(kubectl --context "${KARPENTER_CLUSTER}" get nodeclaims \
@@ -46,7 +55,8 @@ PROVIDER_ID="$(kubectl --context "${KARPENTER_CLUSTER}" get nodeclaims \
 
 if [[ -z "${PROVIDER_ID}" ]]; then
   echo "no node found for ${SOURCE_NODEPOOL}." >&2
-  echo "Run 'bin/bench.sh ${SOURCE_NODEPOOL}' first and do not reset afterwards." >&2
+  echo "Karpenter creates the node when a pod that tolerates its taint is pending. Check that" >&2
+  echo "your pull pod is scheduled and Ready, which is when the pull has finished." >&2
   exit 1
 fi
 

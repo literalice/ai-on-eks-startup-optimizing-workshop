@@ -22,7 +22,7 @@ instead: a shorter demo, then applying one node class in their cluster while you
 | # | Task | Time | If not done |
 |---|---|---|---|
 | 1 | `terraform apply` to build both clusters | 25–30 min | 30 minutes is spent on the day |
-| 2 | `bin/bench.sh baseline`, then `snapshot/snapshot-from-node.sh` | 10 min | `snapshot` cannot be run |
+| 2 | `snapshot/build-snapshot.sh` | 10–20 min | `snapshot` cannot be run |
 | 3 | `snapshot/stage-model.sh` to upload the weights | 5–10 min | phase 2 cannot be run |
 | 4 | `bin/prep.sh` to apply the variants | 2 min | nothing can be run |
 | 5 | Run all four variants, the warm run, and all three phase-2 variants once | 40–50 min | the first execution happens during the session |
@@ -321,7 +321,7 @@ Karpenter で既に GPU ワークロードを動かしており、既存クラ�
 | # | 作業 | 所要 | 未実施の場合 |
 |---|---|---|---|
 | 1 | `terraform apply` でクラスター 2 面を作成 | 25〜30 分 | 当日に 30 分かかる |
-| 2 | `bin/bench.sh baseline` の後 `snapshot/snapshot-from-node.sh` | 10 分 | `snapshot` が実行できない |
+| 2 | `snapshot/build-snapshot.sh` | 10〜20 分 | `snapshot` が実行できない |
 | 3 | `snapshot/stage-model.sh` でウェイトをアップロード | 5〜10 分 | フェーズ 2 が実行できない |
 | 4 | `bin/prep.sh` で variant を適用 | 2 分 | 何も実行できない |
 | 5 | 4 variant、warm 実行、フェーズ 2 の 3 通りを 1 回ずつ実行 | 40〜50 分 | 初回実行が本番になる |
