@@ -139,11 +139,12 @@ being short, because a short compile time is also what a different compilation c
 looks like. On a miss vLLM logs that it compiled and saved the artifacts; on a hit it logs
 `Directly load the compiled graph(s) ... from the cache`.
 
-Two limits. Compilation is the only part this removes: the profiling, KV-cache creation and
-warmup in the same stage accounted for the remaining 12 seconds or so and are unaffected, and
-CUDA graph capture stayed at 4 seconds in both runs. And the artifacts are on the node, so they
-do not survive a node replacement. Restoring them from S3 onto a new node is a third test that
-this workshop describes but does not script.
+Compilation is the only part this removes. The profiling, KV-cache creation and warmup in the
+same stage accounted for the remaining 12 seconds or so and are unaffected, and CUDA graph
+capture stayed at 4 seconds in both runs.
+
+The artifacts are on the node, so they do not survive a node replacement. Restoring them from S3
+onto a new node is a third test that this workshop describes but does not script.
 
 ## What the instance type changed
 
@@ -323,11 +324,11 @@ Model Streamer もモデルのコピーを置きます。ルート全体をマ�
 場合、vLLM はコンパイルして成果物を保存したことを記録し、ヒットの場合は
 `Directly load the compiled graph(s) ... from the cache` を記録します。
 
-限界が 2 つあります。これが除去するのはコンパイルだけです。同じ段階にある profiling、KV cache
-作成、warmup は残りの約 12 秒を占めており影響を受けません。CUDA graph capture もどちらの実行でも
-4 秒のままです。もう 1 つは、成果物がノード上にあるため、ノードの置き換えには残らないことです。
-新規ノードへ S3 から復元することは 3 つ目の試験で、本ワークショップでは記述はしますがスクリプト化
-していません。
+これが除去するのはコンパイルだけです。同じ段階にある profiling、KV cache 作成、warmup は残りの
+約 12 秒を占めており影響を受けません。CUDA graph capture もどちらの実行でも 4 秒のままです。
+
+成果物はノード上にあるため、ノードの置き換えには残りません。新規ノードへ S3 から復元することは
+3 つ目の試験で、本ワークショップでは記述はしますがスクリプト化していません。
 
 ## インスタンスタイプで変わったこと
 

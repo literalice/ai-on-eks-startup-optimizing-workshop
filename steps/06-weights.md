@@ -247,11 +247,12 @@ tables. That route is more specific than the default route, so it wins, and S3 t
 go through NAT. This applies to the weights here, and also to the container image layers in the
 earlier steps, because ECR stores layers in S3.
 
-Two things this does not do. It does not promise a faster download: at the rate a single node
-pulls here, NAT was never close to its limit, and the case where the endpoint matters is many
-nodes scaling out through one NAT gateway at the same time. It also does not change an
-unencrypted connection into an encrypted one, since both paths can use HTTPS. What it removes
-is the NAT data-processing charge and the dependency on NAT.
+What it removes is the NAT data-processing charge and the dependency on NAT.
+
+It does not promise a faster download. At the rate a single node pulls here, NAT was never close
+to its limit, and the case where the endpoint matters is many nodes scaling out through one NAT
+gateway at the same time. It also does not change an unencrypted connection into an encrypted
+one, since both paths can use HTTPS.
 
 If the goal is to take the image pull off NAT completely, the gateway endpoint is not
 sufficient on its own. It covers the layer download, but the registry API calls do not go to
@@ -524,11 +525,12 @@ VPC にはプライベートサブネットと NAT ゲートウェイ 1 つが�
 S3 の通信は NAT を通りません。これはここでのウェイトにも、前のステップのコンテナイメージの
 レイヤにも当てはまります。ECR がレイヤを S3 に保存しているためです。
 
-これが行わないことが 2 つあります。ダウンロードが速くなることは保証しません。ここで 1 台の
-ノードが取得する速度では NAT は能力の限界に近づいておらず、エンドポイントが効いてくるのは多数の
-ノードが 1 つの NAT ゲートウェイを通じて同時にスケールアウトする場合です。また非暗号の接続を
-暗号化するものでもありません。どちらの経路でも HTTPS を使えます。取り除かれるのは NAT のデータ
-処理料金と、NAT への依存です。
+取り除かれるのは NAT のデータ処理料金と、NAT への依存です。
+
+ダウンロードが速くなることは保証しません。ここで 1 台のノードが取得する速度では NAT は能力の限界に
+近づいておらず、エンドポイントが効いてくるのは多数のノードが 1 つの NAT ゲートウェイを通じて同時に
+スケールアウトする場合です。また非暗号の接続を暗号化するものでもありません。どちらの経路でも
+HTTPS を使えます。
 
 イメージ pull を完全に NAT から外すことが目的の場合、ゲートウェイエンドポイントだけでは足りま
 せん。レイヤのダウンロードはカバーしますが、レジストリの API 呼び出しは S3 宛てではありません。

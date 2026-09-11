@@ -49,11 +49,7 @@ Every NodePool below therefore carries a second taint that nothing existing tole
 Only the test pods in this document tolerate `br-test`, and they tolerate it by key and value.
 Change `br-test` to something unused in your cluster if that name is taken.
 
-Two things this does not do. It does not stop a pod that tolerates everything, and it does not
-remove the node pools when you are finished. The cleanup section at the end does that.
-
-Worth checking before you start, since it tells you whether anything in the cluster would
-tolerate the new taint:
+Before you start, you can check whether anything in the cluster would tolerate the new taint:
 
 ```bash
 # any pod with a blanket toleration, which would land anywhere
@@ -72,10 +68,9 @@ The first command lists pods that tolerate any taint. Those are usually DaemonSe
 expected: they will run on the new nodes as they do on every node. A workload pod in that list is
 worth looking at before you continue.
 
-### Two names to choose first
+### Values used throughout
 
-Everything below uses these. Pick a prefix that will not collide with an existing NodePool in
-the cluster.
+Pick a prefix that will not collide with an existing NodePool in the cluster.
 
 ```bash
 export CLUSTER=<your cluster name>
@@ -162,8 +157,6 @@ spec:
           operator: In
           values: ["on-demand"]
 ```
-
-Three fields are worth pausing on.
 
 `alias: bottlerocket@latest` resolves the `aws-k8s-<version>-nvidia` variant for GPU instance
 types. That AMI already contains the NVIDIA driver, the container toolkit and the Kubernetes
@@ -271,8 +264,6 @@ echo "$SNAPSHOT"
 # 4. wait. Three to five minutes for a 9 GB image
 aws ec2 wait snapshot-completed --region "$REGION" --snapshot-ids "$SNAPSHOT"
 ```
-
-Two things to know about this route.
 
 The volume is mounted and being written while it is snapshotted, so the result is
 crash-consistent rather than clean. For a read-only image cache the effect is limited: a
@@ -603,12 +594,13 @@ Measured on `gr6.8xlarge`: 82 seconds with an empty cache, 69 with a populated o
 `torch.compile` went from 14.78 seconds to 3.01. Model load stayed at 2.6 seconds in both,
 which is how we know the weights still came from S3 and the saving belongs to compilation.
 
-Two limits. A hit removes compilation and nothing else in that stage: profiling, KV-cache
-creation and warmup accounted for the remaining 12 seconds and did not move. And the artifacts
-live on the node, so they do not survive a node replacement. Restoring them from S3 onto a new
-node is a further step, and the cache key covers the model, dtype, GPU architecture, vLLM
-version and compilation configuration, so artifacts do not transfer across a change in any of
-those.
+A hit removes compilation and nothing else in that stage. Profiling, KV-cache creation and
+warmup accounted for the remaining 12 seconds and did not move.
+
+The artifacts live on the node, so they do not survive a node replacement. Restoring them from
+S3 onto a new node is a further step, and the cache key covers the model, dtype, GPU
+architecture, vLLM version and compilation configuration, so artifacts do not transfer across a
+change in any of those.
 
 ---
 
@@ -685,11 +677,7 @@ tolerate しています。そもそもそれが GPU ノードに載るための
 この文書のテスト Pod だけが `br-test` を tolerate し、それもキーと値の両方で一致させています。
 クラスター内で `br-test` が既に使われている場合は、未使用の名前に変えてください。
 
-これが行わないことが 2 つあります。すべてを tolerate する Pod は防げません。また、終了後に node
-pool を削除もしません。それは最後の後片付けの節で行います。
-
-開始前に確認しておく価値があります。新しい taint を tolerate してしまうものがクラスター内にあるか
-どうかが分かります。
+開始前に、新しい taint を tolerate してしまうものがクラスター内にあるか確認できます。
 
 ```bash
 # 無条件の toleration を持つ Pod。どこにでも載りうる
@@ -708,9 +696,9 @@ kubectl get pods -A -o wide --field-selector spec.nodeName=<新しいノード>
 想定どおりです。他の全ノードと同様に新しいノードでも動きます。この一覧にワークロードの Pod が
 含まれる場合は、続ける前に確認する価値があります。
 
-### 最初に決める 2 つの名前
+### 以下で使う値
 
-以下すべてでこれを使います。既存の NodePool と衝突しない prefix を選んでください。
+既存の NodePool と衝突しない prefix を選んでください。
 
 ```bash
 export CLUSTER=<クラスター名>
@@ -905,8 +893,6 @@ echo "$SNAPSHOT"
 # 4. 待つ。9 GB のイメージで 3〜5 分
 aws ec2 wait snapshot-completed --region "$REGION" --snapshot-ids "$SNAPSHOT"
 ```
-
-この方法について把握しておくことが 2 つあります。
 
 ボリュームはマウントされ書き込みが続いている状態で取得するため、結果は整合ではなくクラッシュ
 整合です。読み取り専用のイメージキャッシュであれば影響は限定的で、書き込み途中のレイヤは破棄
@@ -1225,9 +1211,10 @@ kubectl logs <pod> | grep "Directly load"
 `torch.compile` は 14.78 秒から 3.01 秒になりました。モデルロードは両方 2.6 秒のままで、これが
 ウェイトが両方とも S3 から来ており、短縮がコンパイルに帰属することの根拠です。
 
-限界が 2 つあります。ヒットが除去するのはコンパイルだけで、その段階の他のものは除去しません。
-profiling、KV cache 作成、warmup が残りの約 12 秒を占めており、動いていません。もう 1 つは、
-成果物がノード上にあるためノードの置き換えには残らないことです。新規ノードへ S3 から復元するのは
+ヒットが除去するのはコンパイルだけで、その段階の他のものは除去しません。profiling、KV cache
+作成、warmup が残りの約 12 秒を占めており、動いていません。
+
+成果物はノード上にあるため、ノードの置き換えには残りません。新規ノードへ S3 から復元するのは
 さらに別の手順で、キャッシュキーはモデル、dtype、GPU アーキテクチャ、vLLM バージョン、コンパイル
 設定を含むため、いずれかが変わると成果物は流用できません。
 
