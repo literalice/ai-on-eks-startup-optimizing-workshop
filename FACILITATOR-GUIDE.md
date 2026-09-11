@@ -11,6 +11,10 @@ README and the `steps/` documents. Participants do not need an AWS account or GP
 the day. Stating this at the start avoids spending time on participants' missing
 prerequisites.
 
+For an audience that already runs GPU workloads on Karpenter and wants these settings in the
+cluster they have, [GUIDED-SESSION.md](GUIDED-SESSION.md) is the run sheet for that shape
+instead: a shorter demo, then applying one node class in their cluster while you guide.
+
 ---
 
 ## 0. Before the day
@@ -305,6 +309,10 @@ Display the decision table and leave time for discussion.
 `steps/` を使って自分の Dev アカウントで同じ手順を実行します。当日、参加者側に AWS アカウント
 や GPU クォータは必要ありません。この点を冒頭で伝えると、参加者側の前提不足に時間を取られずに
 進められます。
+
+Karpenter で既に GPU ワークロードを動かしており、既存クラスターにこの設定を入れたい相手が対象の
+場合は、[GUIDED-SESSION.md](GUIDED-SESSION.md) がその形式の進行メモです。デモを短くし、相手の
+クラスターに node class 1 つを適用するのをガイドする構成になっています。
 
 ---
 
