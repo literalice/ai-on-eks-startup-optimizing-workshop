@@ -224,7 +224,7 @@ spec:
           nvidia.com/gpu: 1
 ```
 
-### Reading the time with kubectl alone
+### The stage timings
 
 The stages are timestamps Kubernetes already records.
 
@@ -436,7 +436,7 @@ snapshot's encryption, and the snapshot came from an encrypted volume.
 **Do not also set `instanceStorePolicy: RAID0` here.** That is step 3, and the two cannot be
 combined. Step 3 covers why.
 
-### Confirming it worked, with kubectl and aws alone
+### Confirming it worked
 
 ```bash
 # the volume the node booted from should carry your snapshot ID
@@ -514,7 +514,7 @@ Whether an array is actually built depends on the disk count.
 | 1 | No array. The device is formatted XFS directly |
 | 0 | `init` logs that it found no ephemeral disks and exits successfully. Nothing is bound, and this node class behaves like step 1 |
 
-Check your type before reading anything into a figure:
+Check your type before you judge a figure:
 
 ```bash
 aws ec2 describe-instance-types --region "$REGION" --instance-types "$GPU_TYPE" \
@@ -547,15 +547,15 @@ what suits a given image.
 
 SOCI parallel pull/unpack was added in Bottlerocket 1.44.0. On an earlier version
 `snapshotter = "soci"` is ignored **without an error**: the node boots, the pod runs, and this
-node class measures the same thing as step 1. Check before believing a result:
+node class measures the same thing as step 1. Check the version before you accept a result:
 
 ```bash
 kubectl get nodes -l br-test=soci -o jsonpath='{.items[0].status.nodeInfo.osImage}'
 ```
 
-### Confirming it worked, with kubectl alone
+### Confirming it worked
 
-Bottlerocket has no shell, so there is no logging in to look. Two things can be read from
+Bottlerocket has no shell, so there is no logging in to look. Two things can be checked from
 outside.
 
 ```bash
@@ -654,7 +654,7 @@ At a 1.5B model on an L4, reading the weights was 0.30 seconds of an 84-second s
 The loader had very little to improve. What the third variation reduced was the copy step, not
 the read.
 
-The line to look at is this one, because it names its own nesting:
+This line names its own nesting:
 
 ```
 init engine (profile, create kv cache, warmup model) took 27.98 s (compilation: 14.76 s)
@@ -931,7 +931,7 @@ plugin が含まれるため、device plugin のデプロイは不要です。�
 ### 計測用の Pod
 
 すでに GPU ワークロードで使っているイメージを指定してください。そうすると数字がサンプルの
-イメージではなく自分のイメージについてのものになります。クラスターから読み取るには次のようにします。
+イメージではなく自分のイメージについてのものになります。クラスターから取得するには次のようにします。
 
 ```bash
 kubectl get pods -A -o json | python3 -c 'import json,sys
@@ -983,7 +983,7 @@ spec:
           nvidia.com/gpu: 1
 ```
 
-### kubectl だけで所要時間を読む
+### 段階ごとの所要時間
 
 各段階は Kubernetes が既に記録しているタイムスタンプです。
 
@@ -1190,7 +1190,7 @@ kubectl delete ec2nodeclass br-test-builder
 **ここに `instanceStorePolicy: RAID0` を併せて設定しないでください。** それはステップ 3 で、
 2 つは併用できません。理由はステップ 3 に書いています。
 
-### kubectl と aws だけで効果を確認する
+### 効果を確認する
 
 ```bash
 # ノードが起動したボリュームに、作成したスナップショット ID が付いているはず
@@ -1267,7 +1267,7 @@ mode = "always"
 | 1 本 | アレイなし。デバイスを直接 XFS でフォーマット |
 | 0 本 | `init` は ephemeral disk が無いと記録して正常終了。何もバインドされず、この node class はステップ 1 と同じ挙動になる |
 
-数字から何かを読み取る前に、自身のタイプを確認してください。
+数字を判断する前に、自身のタイプを確認してください。
 
 ```bash
 aws ec2 describe-instance-types --region "$REGION" --instance-types "$GPU_TYPE" \
@@ -1305,9 +1305,10 @@ SOCI の parallel pull/unpack は Bottlerocket 1.44.0 で追加されました�
 kubectl get nodes -l br-test=soci -o jsonpath='{.items[0].status.nodeInfo.osImage}'
 ```
 
-### kubectl だけで効果を確認する
+### 効果を確認する
 
-Bottlerocket にシェルは無いので、ログインして見ることはできません。外から読めるものが 2 つあります。
+Bottlerocket にシェルは無いので、ログインして見ることはできません。外から確認できるものが 2 つ
+あります。
 
 ```bash
 # コンテナストレージがインスタンスストアに移った。allocatable ephemeral-storage が
@@ -1399,7 +1400,7 @@ kubectl logs <pod> | grep -E "Loading weights took|Model loading took|torch.comp
 ```
 
 L4 上の 1.5B モデルでは、ウェイトの読み込みは start-to-Ready 84 秒のうち 0.30 秒でした。ローダーに
-改善の余地はほとんどありません。3 番目の方式が短縮したのはコピー工程であって、読み込みではありません。
+改善の余地はほとんどありません。3 番目の方式はコピー工程を無くしたことで短縮しました。読み込み自体は速くなっていません。
 
 見るべき行はこれです。自身の入れ子構造を明記しています。
 
