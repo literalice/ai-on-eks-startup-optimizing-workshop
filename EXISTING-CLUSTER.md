@@ -137,8 +137,8 @@ spec:
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: "<CLUSTER>"
-  # If you hold an On-Demand Capacity Reservation for the GPU type, name it here and the
-  # NodePool below can draw from it. By ID:
+  # If you hold an On-Demand Capacity Reservation or a Capacity Block for the GPU type,
+  # name it here and the NodePool below can draw from it. By ID:
   # capacityReservationSelectorTerms:
   #   - id: cr-0123456789abcdef0
   # Or by tag, which picks up reservations added later without editing this:
@@ -184,8 +184,10 @@ spec:
         - key: karpenter.sh/capacity-type
           operator: In
           values: ["on-demand"]
-          # Add "reserved" to let Karpenter use a capacity reservation named in the
-          # node class. Karpenter prefers it, because the reservation is already paid for:
+          # Add "reserved" to let Karpenter use a capacity reservation named in the node
+          # class. "reserved" means On-Demand Capacity Reservations and Capacity Blocks.
+          # It does not mean Reserved Instances. Karpenter prioritises reserved, then
+          # spot, then on-demand:
           # values: ["reserved", "on-demand"]
 ```
 
@@ -322,8 +324,8 @@ spec:
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: "<CLUSTER>"
-  # If you hold an On-Demand Capacity Reservation for the GPU type, name it here and the
-  # NodePool below can draw from it. By ID:
+  # If you hold an On-Demand Capacity Reservation or a Capacity Block for the GPU type,
+  # name it here and the NodePool below can draw from it. By ID:
   # capacityReservationSelectorTerms:
   #   - id: cr-0123456789abcdef0
   # Or by tag, which picks up reservations added later without editing this:
@@ -367,8 +369,10 @@ spec:
         - key: karpenter.sh/capacity-type
           operator: In
           values: ["on-demand"]
-          # Add "reserved" to let Karpenter use a capacity reservation named in the
-          # node class. Karpenter prefers it, because the reservation is already paid for:
+          # Add "reserved" to let Karpenter use a capacity reservation named in the node
+          # class. "reserved" means On-Demand Capacity Reservations and Capacity Blocks.
+          # It does not mean Reserved Instances. Karpenter prioritises reserved, then
+          # spot, then on-demand:
           # values: ["reserved", "on-demand"]
 ```
 
@@ -940,8 +944,8 @@ spec:
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: "<CLUSTER>"
-  # GPU タイプの On-Demand Capacity Reservation を持っている場合、ここで指定すると下の
-  # NodePool がそこから確保できます。ID 指定:
+  # GPU タイプの On-Demand Capacity Reservation または Capacity Block を持っている場合、
+  # ここで指定すると下の NodePool がそこから確保できます。ID 指定:
   # capacityReservationSelectorTerms:
   #   - id: cr-0123456789abcdef0
   # タグ指定。後から追加した予約も、ここを編集せずに対象になります:
@@ -988,7 +992,9 @@ spec:
           operator: In
           values: ["on-demand"]
           # node class で指定した capacity reservation を使う場合は "reserved" を追加します。
-          # 予約は既に支払い済みなので、Karpenter はこちらを優先します:
+          # "reserved" は On-Demand Capacity Reservation と Capacity Block を指します。
+          # Reserved Instances ではありません。Karpenter の優先順は reserved、spot、
+          # on-demand です:
           # values: ["reserved", "on-demand"]
 ```
 
@@ -1124,8 +1130,8 @@ spec:
   subnetSelectorTerms:
     - tags:
         karpenter.sh/discovery: "<CLUSTER>"
-  # GPU タイプの On-Demand Capacity Reservation を持っている場合、ここで指定すると下の
-  # NodePool がそこから確保できます。ID 指定:
+  # GPU タイプの On-Demand Capacity Reservation または Capacity Block を持っている場合、
+  # ここで指定すると下の NodePool がそこから確保できます。ID 指定:
   # capacityReservationSelectorTerms:
   #   - id: cr-0123456789abcdef0
   # タグ指定。後から追加した予約も、ここを編集せずに対象になります:
@@ -1170,7 +1176,9 @@ spec:
           operator: In
           values: ["on-demand"]
           # node class で指定した capacity reservation を使う場合は "reserved" を追加します。
-          # 予約は既に支払い済みなので、Karpenter はこちらを優先します:
+          # "reserved" は On-Demand Capacity Reservation と Capacity Block を指します。
+          # Reserved Instances ではありません。Karpenter の優先順は reserved、spot、
+          # on-demand です:
           # values: ["reserved", "on-demand"]
 ```
 
