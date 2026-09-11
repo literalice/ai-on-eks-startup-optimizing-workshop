@@ -343,7 +343,7 @@ spec:
       ebs: { volumeSize: 4Gi, volumeType: gp3, encrypted: true, deleteOnTermination: true }
     - deviceName: /dev/xvdb
       ebs:
-        volumeSize: 40Gi                # sized for the images, not for a workload node
+        volumeSize: 80Gi                # see the sizing note below
         volumeType: gp3
         encrypted: true
         deleteOnTermination: true
@@ -413,6 +413,14 @@ spec:
 The builder does not need the GPU to pull layers. Pinning the same instance type as your
 workload nodes keeps the AMI variant the same as the nodes the snapshot will be restored onto,
 which is one difference fewer to reason about.
+
+Size the data volume for the unpacked image, not for the compressed size the registry reports. A
+9.35 GB image did not fit in 40 GiB: the pull succeeded, unpacking filled the volume, kubelet
+evicted the pod for `ephemeral-storage`, and then image garbage collection deleted the image
+because nothing referenced it any more. The node was left with disk pressure cleared and no image
+on it, which is the worst version of this failure, because the snapshot is then taken from a
+volume holding nothing. Two to three times the compressed size, plus room above kubelet's
+eviction threshold, is the working rule. 80 GiB is what this workshop uses for a 9.35 GB image.
 
 Then a pod whose only purpose is to make kubelet pull the image. It does not request a GPU, so
 it does not wait on the device plugin:
@@ -1182,7 +1190,7 @@ spec:
       ebs: { volumeSize: 4Gi, volumeType: gp3, encrypted: true, deleteOnTermination: true }
     - deviceName: /dev/xvdb
       ebs:
-        volumeSize: 40Gi                # ワークロードノードではなくイメージに合わせる
+        volumeSize: 80Gi                # サイズの決め方は下の注記
         volumeType: gp3
         encrypted: true
         deleteOnTermination: true
@@ -1250,6 +1258,13 @@ spec:
 
 レイヤの pull に GPU は不要です。それでもワークロードノードと同じインスタンスタイプを指定するのは、
 スナップショットを復元する先のノードと AMI variant を揃え、考慮すべき差異を 1 つ減らすためです。
+
+データボリュームのサイズは、レジストリが表示する圧縮サイズではなく展開後のサイズに合わせてください。
+9.35 GB のイメージは 40 GiB に収まりませんでした。pull は成功し、展開でボリュームが埋まり、kubelet が
+`ephemeral-storage` で Pod を evict し、参照が無くなったイメージを image GC が削除しました。ノードは
+DiskPressure が解消され、イメージが無い状態で残ります。これがこの失敗の最も厄介な形です。何も入って
+いないボリュームからスナップショットを取ることになるためです。目安は圧縮サイズの 2〜3 倍に、kubelet の
+eviction 閾値の分を足した値です。9.35 GB のイメージに対して、このワークショップは 80 GiB を使います。
 
 次に、kubelet にイメージを pull させるためだけの Pod です。GPU を要求しないので、device plugin を
 待ちません。
