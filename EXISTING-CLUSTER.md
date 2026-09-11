@@ -276,13 +276,37 @@ kubectl get pod br-test-baseline \
 kubectl get events --field-selector involvedObject.name=br-test-baseline \
   --sort-by=.lastTimestamp -o wide | grep -E "Pulling|Pulled"
 
-# when the node was created and became Ready
-kubectl get nodeclaim -l karpenter.sh/nodepool=br-test-baseline \
-  -o jsonpath='{range .items[*]}{.metadata.creationTimestamp}{"\t"}{.status.conditions}{"\n"}{end}'
+# the node's own stages, as seconds from when Karpenter created the NodeClaim.
+# The second column is the elapsed total, the third is that step.
+kubectl get nodeclaim -l karpenter.sh/nodepool=br-test-baseline -o json | python3 -c '
+import json, sys
+from datetime import datetime
+def t(s): return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+for nc in json.load(sys.stdin)["items"]:
+    base = t(nc["metadata"]["creationTimestamp"])
+    rows = [("NodeClaim created", base)] + [
+        (c["type"], t(c["lastTransitionTime"])) for c in nc["status"]["conditions"]
+        if c["type"] in ("Launched", "Registered", "Initialized", "Ready")]
+    rows.sort(key=lambda r: r[1])
+    prev = base
+    print(nc["metadata"]["name"])
+    for name, ts in rows:
+        print(f"  {name:<18}{(ts-base).total_seconds():>6.0f}s{(ts-prev).total_seconds():>6.0f}s")
+        prev = ts
+'
 ```
 
-The `Pulled` event is the one to read first. Its message states how long the pull took and how
-many bytes the image was, which together give the throughput the later steps change.
+```
+br-test-baseline-s7bhn
+  NodeClaim created      0s     0s
+  Launched               2s     2s
+  Registered            19s    17s
+  Initialized           36s    17s
+  Ready                 36s     0s
+```
+
+Start with the `Pulled` event. Its message states how long the pull took and how many bytes the
+image was, which together give the throughput the later steps change.
 
 ---
 
@@ -1092,12 +1116,36 @@ kubectl get pod br-test-baseline \
 kubectl get events --field-selector involvedObject.name=br-test-baseline \
   --sort-by=.lastTimestamp -o wide | grep -E "Pulling|Pulled"
 
-# ノードの作成時刻と Ready
-kubectl get nodeclaim -l karpenter.sh/nodepool=br-test-baseline \
-  -o jsonpath='{range .items[*]}{.metadata.creationTimestamp}{"\t"}{.status.conditions}{"\n"}{end}'
+# ノード側の段階。Karpenter が NodeClaim を作った時点からの秒数。
+# 2 列目が経過の累計、3 列目がその段階の所要時間。
+kubectl get nodeclaim -l karpenter.sh/nodepool=br-test-baseline -o json | python3 -c '
+import json, sys
+from datetime import datetime
+def t(s): return datetime.strptime(s, "%Y-%m-%dT%H:%M:%SZ")
+for nc in json.load(sys.stdin)["items"]:
+    base = t(nc["metadata"]["creationTimestamp"])
+    rows = [("NodeClaim created", base)] + [
+        (c["type"], t(c["lastTransitionTime"])) for c in nc["status"]["conditions"]
+        if c["type"] in ("Launched", "Registered", "Initialized", "Ready")]
+    rows.sort(key=lambda r: r[1])
+    prev = base
+    print(nc["metadata"]["name"])
+    for name, ts in rows:
+        print(f"  {name:<18}{(ts-base).total_seconds():>6.0f}s{(ts-prev).total_seconds():>6.0f}s")
+        prev = ts
+'
 ```
 
-最初に読むべきは `Pulled` イベントです。pull の所要時間とイメージのバイト数が書かれており、
+```
+br-test-baseline-s7bhn
+  NodeClaim created      0s     0s
+  Launched               2s     2s
+  Registered            19s    17s
+  Initialized           36s    17s
+  Ready                 36s     0s
+```
+
+最初に見るのは `Pulled` イベントです。pull の所要時間とイメージのバイト数が書かれており、
 この 2 つから以降のステップが変えるスループットが出ます。
 
 ---
