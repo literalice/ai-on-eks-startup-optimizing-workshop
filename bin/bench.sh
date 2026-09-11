@@ -29,6 +29,8 @@ ROOT="$(cd "${HERE}/.." && pwd)"
 
 # shellcheck source=../config.env
 source "${ROOT}/config.env"
+# shellcheck source=./discover.sh
+source "${HERE}/discover.sh"
 
 # Overridable so a rehearsal cannot write fixture-derived numbers into the real
 # results directory and be mistaken for a measurement later.
@@ -138,8 +140,8 @@ fi
 # Render
 ################################################################################
 if [[ "${TARGET}" == "weights" ]]; then
-  if [[ -z "${MODEL_BUCKET}" ]]; then
-    echo "MODEL_BUCKET is unset in config.env -- run snapshot/stage-model.sh first" >&2
+  if ! resolve_bucket; then
+    echo "no weights bucket found -- run snapshot/stage-model.sh first, or set MODEL_BUCKET" >&2
     exit 1
   fi
 
@@ -183,8 +185,8 @@ if [[ "${TARGET}" == "weights" ]]; then
     "VLLM_MODEL_ARG=${VLLM_MODEL_ARG}" \
     "VLLM_LOAD_ARGS=${VLLM_LOAD_ARGS}"
 elif [[ "${TARGET}" == "compile" ]]; then
-  if [[ -z "${MODEL_BUCKET}" ]]; then
-    echo "MODEL_BUCKET is unset in config.env -- run snapshot/stage-model.sh first" >&2
+  if ! resolve_bucket; then
+    echo "no weights bucket found -- run snapshot/stage-model.sh first, or set MODEL_BUCKET" >&2
     exit 1
   fi
 

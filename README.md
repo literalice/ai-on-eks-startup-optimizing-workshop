@@ -273,7 +273,7 @@ the last section.
 ./bin/prep.sh
 ```
 
-This renders the manifests using the Terraform outputs, applies each variant to the
+This renders the manifests, applies each variant to the
 appropriate cluster, and checks that the Bottlerocket AMI is at least 1.44.0. SOCI
 parallel pull/unpack was added in 1.44.0. On an earlier version the snapshotter setting
 is ignored without an error, the node boots and the pod runs, and `soci` measures the
@@ -351,9 +351,10 @@ a node.
 Stage the weights once:
 
 ```bash
-# put MODEL_BUCKET from `terraform output -raw model_bucket` into config.env
 ./snapshot/stage-model.sh
 ```
+
+The bucket is found by its `Purpose` tag. Set `MODEL_BUCKET` in `config.env` to override it.
 
 Then run three variants. The node, model and bytes are the same in all three, and only
 the loader differs:
@@ -567,6 +568,7 @@ bin/
   verify_env.sh                   what terraform built, before the first variant
   check_capacity.sh               GPU capacity, before a measurement run
   prep.sh                         render, apply, check versions
+  discover.sh                     finds the node role and the bucket (sourced)
   bench.sh                        run one variant, collect, compute
   reset.sh                        return a variant to a cold state
   watch_stages.py                 prints each step's figure as it completes
@@ -885,7 +887,7 @@ ID は `results/snapshot-id.txt` と SSM パラメータに書かれ、`bin/prep
 ./bin/prep.sh
 ```
 
-Terraform の出力を使ってマニフェストを展開し、各 variant を該当クラスターに適用し、
+マニフェストを展開して各 variant を該当クラスターに適用し、
 Bottlerocket AMI が 1.44.0 以上であることを確認します。SOCI の parallel pull/unpack は
 1.44.0 で追加されました。それより前のバージョンでは snapshotter の設定がエラーなしで
 無視され、ノードは起動し Pod も動き、`soci` は `baseline` と同じものを計測します。その
@@ -958,9 +960,10 @@ Pod 側にあり、イメージ配送よりノードのキャパシティ方針�
 ウェイトを一度 S3 に配置します。
 
 ```bash
-# `terraform output -raw model_bucket` の値を config.env の MODEL_BUCKET に設定
 ./snapshot/stage-model.sh
 ```
+
+バケットは `Purpose` タグから特定されます。`config.env` の `MODEL_BUCKET` で上書きできます。
 
 続いて 3 通りを実行します。ノード、モデル、バイト列は 3 つとも同じで、ローダーだけが
 異なります。
@@ -1167,6 +1170,7 @@ bin/
   verify_env.sh                   terraform が構築したもの。最初の variant の前
   check_capacity.sh               GPU 容量。計測実行の前
   prep.sh                         展開、適用、バージョン確認
+  discover.sh                     ノードロールとバケットを特定（source される）
   bench.sh                        1 つの variant を実行し、収集・算出
   reset.sh                        variant をコールド状態に戻す
   watch_stages.py                 各段階の数字を完了時に出力

@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 #
-# Render the manifests with the values Terraform produced and apply them to the
-# right cluster. Idempotent -- safe to re-run.
+# Render the manifests and apply them to the right cluster. Idempotent -- safe to re-run.
 
 set -euo pipefail
 
@@ -10,6 +9,8 @@ ROOT="$(cd "${HERE}/.." && pwd)"
 
 # shellcheck source=../config.env
 source "${ROOT}/config.env"
+# shellcheck source=./discover.sh
+source "${HERE}/discover.sh"
 
 RENDERED="${ROOT}/manifests/rendered"
 mkdir -p "${RENDERED}" "${ROOT}/results" "${ROOT}/raw"
@@ -27,78 +28,11 @@ aws eks update-kubeconfig --region "${REGION}" --name "${KARPENTER_CLUSTER}" --a
 aws eks update-kubeconfig --region "${REGION}" --name "${AUTOMODE_CLUSTER}" --alias "${AUTOMODE_CLUSTER}" >/dev/null
 
 ################################################################################
-# Two values have to be resolved: the node IAM role the EC2NodeClass references, and the
-# weights bucket. Neither is read from Terraform if it can be read from the cluster or from
-# AWS, so this works against a cluster whose state lives somewhere else or nowhere.
-#
-# The role cannot be discovered from AWS alone. Both the Karpenter node role and a managed
-# node group's role appear as EC2_LINUX access entries and carry the same tags, so there is
-# nothing there to tell them apart. What is unambiguous is an EC2NodeClass that already names
-# one, which covers any cluster already running Karpenter. On a cluster built from this
-# directory's Terraform there are no node classes until this script creates them, so the
-# Terraform output is the source on the first run.
+# The node IAM role the EC2NodeClass references, and the weights bucket. Both come from the
+# cluster or from AWS where possible rather than from Terraform, so this works against a
+# cluster whose state lives somewhere else or nowhere. See bin/discover.sh.
 ################################################################################
-
-# `terraform output -raw` writes its warnings to stdout as well as stderr and exits 0 when the
-# state has no outputs. Capturing it without checking puts a multi-line warning into the
-# variable, which then reaches sed and fails there instead of here:
-#
-#   sed: 1: "s|@KARPENTER_NODE_IAM_R ...": unescaped newline inside substitute pattern
-sane_name() {
-  local value="$1"
-  [[ "$(printf '%s' "${value}" | wc -l | tr -d ' ')" == "0" ]] || return 1
-  [[ -n "${value}" && "${value}" =~ ^[A-Za-z0-9._-]+$ ]] || return 1
-  printf '%s' "${value}"
-}
-
-tf_output() {
-  local value
-  value="$(terraform -chdir="${ROOT}/terraform" output -raw "$1" 2>/dev/null)" || return 1
-  sane_name "${value}"
-}
-
-# From any EC2NodeClass in the cluster. Skips the ones this workshop owns, so a re-run reads
-# the cluster's own rather than echoing back what it wrote last time.
-role_from_cluster() {
-  local value
-  value="$(kubectl --context "${KARPENTER_CLUSTER}" get ec2nodeclass -o json 2>/dev/null \
-    | python3 -c 'import json,sys
-mine = {"baseline", "snapshot", "soci"}
-try:
-    items = json.load(sys.stdin).get("items", [])
-except Exception:
-    sys.exit(1)
-for source in (False, True):
-    for i in items:
-        if (i["metadata"]["name"] in mine) is source:
-            role = (i.get("spec") or {}).get("role")
-            if role:
-                print(role)
-                sys.exit(0)
-sys.exit(1)' 2>/dev/null)" || return 1
-  sane_name "${value}"
-}
-
-# The bucket carries the Purpose tag, and its name starts with the prefix, which keeps this
-# from picking up a bucket belonging to another copy of this workshop in the same account.
-bucket_from_tags() {
-  local value
-  value="$(aws resourcegroupstaggingapi get-resources --region "${REGION}" \
-    --tag-filters "Key=Purpose,Values=bottlerocket-startup-workshop" \
-    --resource-type-filters s3 \
-    --query "ResourceTagMappingList[].ResourceARN" --output text 2>/dev/null \
-    | tr '\t' '\n' | sed 's|^arn:aws:s3:::||' \
-    | grep "^${NAME_PREFIX}-models-" | head -1)" || return 1
-  sane_name "${value}"
-}
-
-if [[ -n "${KARPENTER_NODE_IAM_ROLE_NAME:-}" ]]; then
-  ROLE_SOURCE="the environment"
-elif KARPENTER_NODE_IAM_ROLE_NAME="$(role_from_cluster)"; then
-  ROLE_SOURCE="an existing EC2NodeClass in ${KARPENTER_CLUSTER}"
-elif KARPENTER_NODE_IAM_ROLE_NAME="$(tf_output karpenter_node_iam_role_name)"; then
-  ROLE_SOURCE="terraform output"
-else
+if ! resolve_role; then
   echo "" >&2
   echo "could not resolve the Karpenter node IAM role." >&2
   echo "" >&2
@@ -118,17 +52,7 @@ else
   exit 1
 fi
 
-if [[ -n "${MODEL_BUCKET:-}" ]]; then
-  BUCKET_SOURCE="config.env or the environment"
-elif MODEL_BUCKET="$(bucket_from_tags)"; then
-  BUCKET_SOURCE="the Purpose tag"
-elif MODEL_BUCKET="$(tf_output model_bucket)"; then
-  BUCKET_SOURCE="terraform output"
-else
-  MODEL_BUCKET=""
-  BUCKET_SOURCE=""
-fi
-export MODEL_BUCKET
+resolve_bucket || true
 
 echo "    karpenter node role : ${KARPENTER_NODE_IAM_ROLE_NAME}  (from ${ROLE_SOURCE})"
 if [[ -n "${MODEL_BUCKET}" ]]; then

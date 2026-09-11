@@ -18,6 +18,8 @@ ROOT="$(cd "${HERE}/.." && pwd)"
 
 # shellcheck source=../config.env
 source "${ROOT}/config.env"
+# shellcheck source=./discover.sh
+source "${HERE}/discover.sh"
 
 RED=$'\033[31m'; GREEN=$'\033[32m'; YELLOW=$'\033[33m'; BOLD=$'\033[1m'; RESET=$'\033[0m'
 
@@ -161,10 +163,12 @@ fi
 ################################################################################
 head2 "Credentials for the weights bucket"
 
-if [[ -z "${MODEL_BUCKET}" ]]; then
-  warn "MODEL_BUCKET is empty in config.env, so phases 2 and 3 cannot run"
-  note "terraform -chdir=terraform output -raw model_bucket"
+if ! resolve_bucket; then
+  warn "no weights bucket found, so phases 2 and 3 cannot run"
+  note "Nothing set MODEL_BUCKET, no bucket carries the Purpose tag with the ${NAME_PREFIX}-models-"
+  note "prefix, and terraform/ has no model_bucket output. Set MODEL_BUCKET in config.env."
 else
+  pass "bucket ${MODEL_BUCKET} (from ${BUCKET_SOURCE})"
   if aws s3api head-bucket --bucket "${MODEL_BUCKET}" >/dev/null 2>&1; then
     OBJECTS="$(aws s3api list-objects-v2 --bucket "${MODEL_BUCKET}" \
       --prefix "${MODEL_PREFIX}/" --query 'length(Contents)' --output text 2>/dev/null)"

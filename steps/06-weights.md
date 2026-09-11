@@ -12,9 +12,10 @@ each run also measures the time until the server produces its first token.
 ## Preparation
 
 ```bash
-# put MODEL_BUCKET from `terraform output -raw model_bucket` into config.env
 snapshot/stage-model.sh
 ```
+
+The bucket is found by its `Purpose` tag. Set `MODEL_BUCKET` in `config.env` to override it.
 
 This submits a Job that downloads the model from Hugging Face and uploads it to S3, then
 follows its log. The download and the upload happen on a node rather than on your machine, so
@@ -298,9 +299,10 @@ Back to: [README](../README.md#what-to-adopt)
 ## 事前準備
 
 ```bash
-# `terraform output -raw model_bucket` の値を config.env の MODEL_BUCKET に設定
 snapshot/stage-model.sh
 ```
+
+バケットは `Purpose` タグから特定されます。`config.env` の `MODEL_BUCKET` で上書きできます。
 
 Hugging Face からモデルを取得して S3 にアップロードする Job を投入し、そのログを追跡します。
 ダウンロードとアップロードは手元のマシンではなくノード上で行われるため、このためにローカルに

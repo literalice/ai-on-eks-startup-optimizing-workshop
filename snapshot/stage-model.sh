@@ -22,14 +22,20 @@ ROOT="$(cd "${HERE}/.." && pwd)"
 
 # shellcheck source=../config.env
 source "${ROOT}/config.env"
+# shellcheck source=../bin/discover.sh
+source "${ROOT}/bin/discover.sh"
 
 JOB_TIMEOUT="${JOB_TIMEOUT:-1800}"
 
-if [[ -z "${MODEL_BUCKET}" ]]; then
-  echo "MODEL_BUCKET is empty in config.env." >&2
-  echo "Set it to: $(terraform -chdir="${ROOT}/terraform" output -raw model_bucket 2>/dev/null || echo '<terraform output -raw model_bucket>')" >&2
+if ! resolve_bucket; then
+  echo "no weights bucket found." >&2
+  echo "" >&2
+  echo "Nothing set MODEL_BUCKET, no bucket carries the Purpose tag with the" >&2
+  echo "${NAME_PREFIX}-models- prefix, and ${ROOT}/terraform has no model_bucket output." >&2
+  echo "Set MODEL_BUCKET in config.env to the bucket the Job should write to." >&2
   exit 1
 fi
+echo "==> bucket ${MODEL_BUCKET} (from ${BUCKET_SOURCE})"
 
 if ! kubectl --context "${KARPENTER_CLUSTER}" -n bench get serviceaccount stage-model >/dev/null 2>&1; then
   echo "the stage-model service account does not exist in namespace bench." >&2
