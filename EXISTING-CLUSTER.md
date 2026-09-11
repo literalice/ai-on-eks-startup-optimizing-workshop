@@ -146,6 +146,10 @@ spec:
   #   - tags:
   #       purpose: gpu-inference
   #     ownerID: "<account ID>"          # required when the reservation is shared with you
+  # An ODCR that expires or is cancelled does not terminate the node. Karpenter relabels it
+  # karpenter.sh/capacity-type: on-demand and it keeps running. A Capacity Block does not
+  # behave that way: EC2 terminates those instances at the end of the block, and Karpenter
+  # starts draining them 10 minutes before.
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -187,7 +191,8 @@ spec:
           # Add "reserved" to let Karpenter use a capacity reservation named in the node
           # class. "reserved" means On-Demand Capacity Reservations and Capacity Blocks.
           # It does not mean Reserved Instances. Karpenter prioritises reserved, then
-          # spot, then on-demand:
+          # spot, then on-demand, and keeping on-demand in this list is what gives it
+          # somewhere to fall back to when the reservation has nothing available:
           # values: ["reserved", "on-demand"]
 ```
 
@@ -333,6 +338,10 @@ spec:
   #   - tags:
   #       purpose: gpu-inference
   #     ownerID: "<account ID>"          # required when the reservation is shared with you
+  # An ODCR that expires or is cancelled does not terminate the node. Karpenter relabels it
+  # karpenter.sh/capacity-type: on-demand and it keeps running. A Capacity Block does not
+  # behave that way: EC2 terminates those instances at the end of the block, and Karpenter
+  # starts draining them 10 minutes before.
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -372,7 +381,8 @@ spec:
           # Add "reserved" to let Karpenter use a capacity reservation named in the node
           # class. "reserved" means On-Demand Capacity Reservations and Capacity Blocks.
           # It does not mean Reserved Instances. Karpenter prioritises reserved, then
-          # spot, then on-demand:
+          # spot, then on-demand, and keeping on-demand in this list is what gives it
+          # somewhere to fall back to when the reservation has nothing available:
           # values: ["reserved", "on-demand"]
 ```
 
@@ -953,6 +963,10 @@ spec:
   #   - tags:
   #       purpose: gpu-inference
   #     ownerID: "<アカウント ID>"        # 予約が共有されている場合は必須
+  # ODCR が期限切れやキャンセルになってもノードは終了しません。Karpenter が
+  # karpenter.sh/capacity-type: on-demand に付け替え、そのまま動き続けます。Capacity Block は
+  # 違います。ブロック終了時に EC2 がインスタンスを終了し、Karpenter はその 10 分前から
+  # drain を始めます。
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -994,7 +1008,7 @@ spec:
           # node class で指定した capacity reservation を使う場合は "reserved" を追加します。
           # "reserved" は On-Demand Capacity Reservation と Capacity Block を指します。
           # Reserved Instances ではありません。Karpenter の優先順は reserved、spot、
-          # on-demand です:
+          # on-demand で、予約に空きがないときの退避先になるのがこの on-demand です:
           # values: ["reserved", "on-demand"]
 ```
 
@@ -1139,6 +1153,10 @@ spec:
   #   - tags:
   #       purpose: gpu-inference
   #     ownerID: "<アカウント ID>"        # 予約が共有されている場合は必須
+  # ODCR が期限切れやキャンセルになってもノードは終了しません。Karpenter が
+  # karpenter.sh/capacity-type: on-demand に付け替え、そのまま動き続けます。Capacity Block は
+  # 違います。ブロック終了時に EC2 がインスタンスを終了し、Karpenter はその 10 分前から
+  # drain を始めます。
 ---
 apiVersion: karpenter.sh/v1
 kind: NodePool
@@ -1178,7 +1196,7 @@ spec:
           # node class で指定した capacity reservation を使う場合は "reserved" を追加します。
           # "reserved" は On-Demand Capacity Reservation と Capacity Block を指します。
           # Reserved Instances ではありません。Karpenter の優先順は reserved、spot、
-          # on-demand です:
+          # on-demand で、予約に空きがないときの退避先になるのがこの on-demand です:
           # values: ["reserved", "on-demand"]
 ```
 
